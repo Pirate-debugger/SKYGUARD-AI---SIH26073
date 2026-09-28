@@ -8,7 +8,7 @@ Generates physically plausible surface observations across a realistic network o
 - Elevation lapse rate (~6.5°C / 1000m)
 - Atmospheric tide on surface pressure (semi-diurnal oscillation ~1.5 hPa)
 - Controlled deterministic ground-truth anomalies for benchmark evaluation
-- Clearly labeled as SYNTHETIC / DEMO DATA
+- Clearly labeled as SYNTHETIC / DEMO DATA (aligned with SIH26073 requirements)
 """
 
 import math
@@ -47,7 +47,7 @@ class WeatherDataGenerator:
                 "frozen_param": None,
                 "drift_offset": 0.0,
                 "drift_param": None,
-                "is_drifting": False,
+                "drift_count": 0,
                 "active_injection": None
             }
 
@@ -57,14 +57,14 @@ class WeatherDataGenerator:
         
         # Diurnal solar cycle: minimum around 05:30 (sunrise), peak around 14:30
         solar_angle = (hour_frac - 5.5) * (2.0 * math.pi / 24.0)
-        diurnal_factor = -math.cos(solar_angle) # -1 at 5:30, +1 at 17:30 approx
+        diurnal_factor = -math.cos(solar_angle)
         
         # Base temperature: 28°C base, diurnal amplitude ~7°C
         # Elevation lapse rate: -6.5°C per 1000m above sea level
         lapse_correction = -0.0065 * (station.elevation_m - 200.0)
         temp_base = 28.0 + 7.0 * diurnal_factor + lapse_correction
         
-        # Natural turbulence micro-noise (±0.3°C)
+        # Natural turbulence micro-noise (±0.25°C)
         temp = temp_base + self.rng.normal(0.0, 0.25)
         
         # Relative humidity: inversely coupled with temperature (higher at dawn ~85%, lower at midday ~45%)
@@ -72,7 +72,6 @@ class WeatherDataGenerator:
         rh = float(np.clip(rh_base + self.rng.normal(0.0, 1.5), 15.0, 95.0))
         
         # Atmospheric pressure: Barometric formula with semi-diurnal atmospheric tide (~1.5 hPa cycle)
-        # Pressure decreases ~1 hPa per 8.3m elevation
         elevation_p_drop = (station.elevation_m / 8.3)
         tide = 1.2 * math.sin((hour_frac / 12.0) * 2.0 * math.pi)
         pres = 1013.25 - elevation_p_drop + tide + self.rng.normal(0.0, 0.4)
@@ -104,7 +103,8 @@ class WeatherDataGenerator:
 
         if scenario == "SPIKE":
             label = "SENSOR_SPIKE"
-            spike_val = magnitude if magnitude is not None else 58.0
+            # Plausible but sharp sensor jump (+13.5°C, stays under physical max 65°C)
+            spike_val = magnitude if magnitude is not None else 13.5
             temp = round(temp + spike_val, 2)
             
         elif scenario == "FREEZE":
@@ -115,11 +115,11 @@ class WeatherDataGenerator:
             label = "SENSOR_FREEZE" if st_state["frozen_count"] >= 4 else "NORMAL"
             
         elif scenario == "DRIFT":
-            drift_step = magnitude if magnitude is not None else 0.45
+            drift_step = magnitude if magnitude is not None else 0.40
             st_state["drift_offset"] += drift_step
             temp = round(temp + st_state["drift_offset"], 2)
             st_state["drift_count"] = st_state.get("drift_count", 0) + 1
-            label = "CALIBRATION_DRIFT" if st_state["drift_count"] >= 8 else "NORMAL"
+            label = "CALIBRATION_DRIFT" if st_state["drift_count"] >= 6 else "NORMAL"
             
         elif scenario == "COMM_GAP":
             label = "COMMUNICATION_FAILURE"
@@ -137,26 +137,26 @@ class WeatherDataGenerator:
             
         elif scenario == "DATA_CORRUPTION":
             label = "DATA_CORRUPTION"
-            # Impossible out-of-range sensor value
-            temp = 142.5 # Impossible surface temperature
+            # Impossible out-of-range sensor value (violates physical boundaries)
+            temp = 142.5
             
         elif scenario == "WEATHER_EVENT":
             label = "REGIONAL_WEATHER_EVENT"
-            # E.g. synoptic heatburst / warm frontal surge (+10°C) with physical RH depression
-            temp = round(temp + 10.5, 2)
-            rh = round(max(15.0, rh - 18.0), 1)
-            pres = round(pres - 3.5, 2)
+            # Synoptic heatburst / warm frontal surge (+7.5°C) with coherent physical RH drop and pressure shift
+            temp = round(temp + 7.5, 2)
+            rh = round(max(15.0, rh - 15.0), 1)
+            pres = round(pres - 3.0, 2)
             
         elif scenario == "MULTIVARIATE_DISCORD":
             label = "MULTIVARIATE_INCONSISTENCY"
-            # Dewpoint impossible: RH 98% with 48°C temperature
+            # Dewpoint violation: RH 99% with 48°C temperature
             temp = 48.0
             rh = 99.0
             
         elif scenario == "SPATIAL_OUTLIER":
             label = "SPATIAL_INCONSISTENCY"
-            # Station temperature deviates 12°C from all neighbors, but not an instantaneous jump
-            temp = round(temp + 12.0, 2)
+            # Station temperature deviates 11°C from all neighbors
+            temp = round(temp + 11.0, 2)
 
         reading = RawReading(
             station_id=station.station_id,
@@ -187,7 +187,6 @@ class WeatherDataGenerator:
             for st in self.stations:
                 scenario = None
                 
-                # Injected anomalies for specific benchmark stations during targeted windows:
                 # AWS-001: Isolated Temperature Spike at timestep 40
                 if st.station_id == "AWS-001" and t == 40:
                     scenario = "SPIKE"

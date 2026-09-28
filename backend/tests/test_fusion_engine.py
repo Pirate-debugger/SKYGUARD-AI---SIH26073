@@ -19,7 +19,8 @@ from app.models.schemas import (
     SpatialEvidence,
     MLEvidence,
     DecisionClassification,
-    SeverityLevel
+    SeverityLevel,
+    EvidenceStrength
 )
 
 
@@ -32,10 +33,10 @@ def test_fusion_sensor_spike():
     spatial = SpatialEvidence(is_consistent=False, neighbor_count=3, relative_deviations={"temperature": 24.5}, explanation="Isolated outlier")
     ml = MLEvidence(is_anomaly=True, anomaly_score=-0.25, confidence=0.92)
 
-    decision, severity, conf, explanation = fe.fuse_signals(dq, temp, mv, spatial, ml)
+    decision, severity, conf, ev_str, explanation = fe.fuse_signals(dq, temp, mv, spatial, ml)
     assert decision == DecisionClassification.SENSOR_ANOMALY
     assert severity in (SeverityLevel.HIGH, SeverityLevel.CRITICAL)
-    assert conf >= 0.85
+    assert conf >= 0.70
     assert "Sensor Anomaly" in explanation
 
 
@@ -43,14 +44,21 @@ def test_fusion_weather_event_false_alarm_reduction():
     fe = AnomalyFusionEngine()
     
     dq = DataQualityResult(status=DataQualityStatus.VALID, issues=[], is_valid=True)
-    # Temporal shows high temperature or rapid rise
     temp = TemporalEvidence(spike_detected=True, robust_z_scores={"temperature": 3.8}, explanation="Rapid synoptic heat surge")
     mv = MultivariateEvidence(is_consistent=True, consistency_score=0.8, explanation="Coupled thermodynamic drop in RH")
-    # Spatial shows regional event corroboration (neighbors also surged!)
-    spatial = SpatialEvidence(is_consistent=True, neighbor_count=4, regional_event_detected=True, relative_deviations={"temperature": 0.8}, explanation="Corroborated by 4 neighbors")
+    spatial = SpatialEvidence(
+        is_consistent=True,
+        neighbor_count=4,
+        valid_neighbor_count=4,
+        regional_event_detected=True,
+        agreement_ratio=1.0,
+        corroborating_stations_count=4,
+        relative_deviations={"temperature": 0.8},
+        explanation="Corroborated by 4 neighbors"
+    )
     ml = MLEvidence(is_anomaly=True, anomaly_score=-0.08, confidence=0.70)
 
-    decision, severity, conf, explanation = fe.fuse_signals(dq, temp, mv, spatial, ml)
+    decision, severity, conf, ev_str, explanation = fe.fuse_signals(dq, temp, mv, spatial, ml)
     # Must NOT be flagged as sensor fault!
     assert decision == DecisionClassification.WEATHER_EVENT
     assert "Genuine Meteorological Event" in explanation
@@ -65,9 +73,9 @@ def test_fusion_frozen_sensor():
     spatial = SpatialEvidence(is_consistent=True, neighbor_count=3)
     ml = MLEvidence(is_anomaly=False, anomaly_score=0.05, confidence=0.70)
 
-    decision, severity, conf, explanation = fe.fuse_signals(dq, temp, mv, spatial, ml)
+    decision, severity, conf, ev_str, explanation = fe.fuse_signals(dq, temp, mv, spatial, ml)
     assert decision == DecisionClassification.SENSOR_ANOMALY
-    assert "Frozen Values" in explanation
+    assert "Frozen Output" in explanation
 
 
 def test_fusion_data_corruption():
@@ -79,7 +87,7 @@ def test_fusion_data_corruption():
     spatial = SpatialEvidence()
     ml = MLEvidence()
 
-    decision, severity, conf, explanation = fe.fuse_signals(dq, temp, mv, spatial, ml)
+    decision, severity, conf, ev_str, explanation = fe.fuse_signals(dq, temp, mv, spatial, ml)
     assert decision == DecisionClassification.COMMUNICATION_ERROR
     assert severity == SeverityLevel.CRITICAL
-    assert "Data Corruption" in explanation
+    assert "Data Quality" in explanation

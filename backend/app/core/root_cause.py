@@ -74,13 +74,15 @@ class RootCauseClassifier:
             ]
             return ProbableCause.SENSOR_FREEZE, 0.96, signals
 
+        # Thermodynamic / Multivariate Inconsistency Check
+        if not multivariate.is_consistent:
+            return ProbableCause.MULTIVARIATE_INCONSISTENCY, 0.92, [multivariate.explanation]
+
         if temporal.spike_detected or temporal.drop_detected:
             signals = [
                 f"Abrupt transient rate-of-change leap ({temporal.explanation})",
-                f"Spatial divergence (Δ={max(spatial.relative_deviations.values() or [0]):.1f})"
+                f"Spatial divergence (Delta={max(spatial.relative_deviations.values() or [0]):.1f})"
             ]
-            if not multivariate.is_consistent:
-                signals.append(f"Decoupled from companion parameters: {', '.join(multivariate.discordant_parameters)}")
             return ProbableCause.SENSOR_SPIKE, 0.94, signals
 
         if not multivariate.is_consistent:

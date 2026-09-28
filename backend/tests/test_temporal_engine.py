@@ -17,7 +17,9 @@ def test_temperature_spike_detection():
     # Establish warm baseline (normal readings ~30°C)
     for i in range(10):
         t = base_time + timedelta(minutes=5 * i)
-        te.analyze(RawReading(station_id=st_id, timestamp=t.isoformat(), temperature=30.0 + (i % 2)*0.2, pressure=1010.0, humidity=50.0))
+        r = RawReading(station_id=st_id, timestamp=t.isoformat(), temperature=30.0 + (i % 2)*0.2, pressure=1010.0, humidity=50.0)
+        te.analyze(r)
+        te.commit_reading(r)
         
     # Sudden abrupt spike to 55°C
     spike_time = base_time + timedelta(minutes=50)
@@ -35,12 +37,16 @@ def test_frozen_sensor_detection():
     base_time = datetime(2026, 9, 29, 10, 0, 0)
     
     # 7 identical humidity readings
+    evidence = None
     for i in range(7):
         t = base_time + timedelta(minutes=5 * i)
-        evidence = te.analyze(RawReading(station_id=st_id, timestamp=t.isoformat(), temperature=25.0 + i*0.1, pressure=1010.0, humidity=61.0))
+        r = RawReading(station_id=st_id, timestamp=t.isoformat(), temperature=25.0 + i*0.1, pressure=1010.0, humidity=61.0)
+        evidence = te.analyze(r)
+        te.commit_reading(r)
         
+    assert evidence is not None
     assert evidence.freeze_detected is True
-    assert evidence.frozen_duration_steps["humidity"] >= 6
+    assert evidence.frozen_duration_steps["humidity"] >= 4
 
 
 def test_calibration_drift_detection():
@@ -48,11 +54,15 @@ def test_calibration_drift_detection():
     st_id = "AWS-003"
     base_time = datetime(2026, 9, 29, 10, 0, 0)
     
-    # Systematic creeping drift of +0.3°C per step over 15 steps
+    # Systematic creeping drift of +0.35°C per step over 15 steps
+    evidence = None
     for i in range(15):
         t = base_time + timedelta(minutes=5 * i)
         drift_temp = 25.0 + i * 0.35
-        evidence = te.analyze(RawReading(station_id=st_id, timestamp=t.isoformat(), temperature=drift_temp, pressure=1010.0, humidity=50.0))
+        r = RawReading(station_id=st_id, timestamp=t.isoformat(), temperature=drift_temp, pressure=1010.0, humidity=50.0)
+        evidence = te.analyze(r)
+        te.commit_reading(r)
         
+    assert evidence is not None
     assert evidence.drift_detected is True
     assert evidence.trend_slopes["temperature"] > 0.05

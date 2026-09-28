@@ -94,17 +94,17 @@ class AnomalyReportGenerator:
 ---
 
 ## 4. ANALYTICAL METHODOLOGY
-1. **Data Quality Layer:** Validates strict WMO physical envelopes (T: -50 to 65°C, P: 500 to 1100 hPa, RH: 0 to 100%) and rejects corrupted payloads without silent interpolation.
-2. **Temporal Engine:** Calculates running median absolute deviation (MAD), instantaneous rates of change, zero-variance persistence (frozen values), and monotonic linear regression slopes (drift).
-3. **Multivariate Engine:** Enforces Magnus-Tetens thermodynamic dewpoint limits ($T_{{dew}} \\le T_{{air}}$) and computes Mahalanobis distance over empirical atmospheric covariance.
-4. **Spatial Neighborhood Consensus:** Evaluates target station against $k$-nearest spatial neighbors within 150 km using Haversine distance, distinguishing localized faults from regional weather events.
-5. **Machine Learning Layer:** Isolation Forest trained on joint 10-dimensional spatial-temporal feature space providing standardized anomaly scores and feature attributions.
+1. **Data Quality Layer:** Validates physical envelopes (T: -50 to 65°C, P: 500 to 1100 hPa, RH: 0 to 100%) aligned with selected meteorological QC concepts described in WMO guidance and rejects corrupted payloads without silent interpolation.
+2. **Temporal Engine:** Calculates running median absolute deviation (MAD), instantaneous rates of change, zero-variance persistence (frozen values), monotonic linear regression slopes (drift), and CUSUM change-point detection for sudden regime shifts.
+3. **Multivariate Engine:** Evaluates statistical multivariate consistency, enforces Magnus-Tetens thermodynamic dewpoint limits ($T_{{dew}} \\le T_{{air}}$), and computes Mahalanobis distance over empirical atmospheric covariance.
+4. **Spatial Neighborhood Consensus:** Evaluates target station against $k$-nearest spatial neighbors within 150 km using Haversine distance, elevation-adjusted hypsometric reduction, and directional change agreement ratio, distinguishing localized faults from regional weather events.
+5. **Machine Learning Layer:** Isolation Forest trained on joint 10-dimensional spatial-temporal residual feature space providing standardized anomaly scores and distance-based feature attributions.
 6. **False-Alarm Reduction:** Multi-station cross-corroboration ensures elevated readings matching neighboring patterns are classified as `WEATHER_EVENT` rather than sensor defects.
 
 ---
 
 ## 5. SYSTEM LIMITATIONS & DISCLOSURE
 - **Demo Data Notice:** Data used for this demonstration is realistic synthetic data modeled on tropical and subtropical weather dynamics with controlled injection of known sensor faults.
-- **Edge Deployment Note:** For field operation on ultra-low-power microcontrollers (e.g. ESP32 / Cortex-M), the pipeline is partitioned into lightweight Edge-QC (C/C++ rules) and Gateway/Server ensemble analysis.
+- **Edge Architecture Note:** The pipeline is architected for hierarchical edge-gateway partitioning (Edge-ready QC rules on dataloggers, ensemble fusion on local gateway or server). Not a certified field deployment.
 """
         return md

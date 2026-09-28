@@ -3,19 +3,19 @@ Decision Fusion Engine for SkyGuard AI
 SIH26073: Automatic Weather Station Anomaly Detection System
 
 THE CORE INTELLIGENCE:
-Distinguishes Genuine Meteorological Events from Sensor & Data Anomalies.
+Determines: "Did the atmosphere change, or did the observation system fail?"
 
 Inputs:
-- Data Quality Signal
-- Temporal Signal
-- Multivariate Signal
-- Spatial Signal
-- Machine Learning (Isolation Forest) Signal
+- Data Quality Signal (Physical & operational bounds)
+- Temporal Signal (Instantaneous jump, short-term MAD, CUSUM change-point, freeze, drift)
+- Multivariate Signal (Thermodynamic dewpoint limit, dynamic coupling, statistical Mahalanobis)
+- Spatial Signal (Elevation-adjusted neighborhood consensus, directional agreement ratio)
+- Machine Learning (Isolation Forest on standardized residual features)
 
 Outputs:
 - Decision: NORMAL, WEATHER_EVENT, SENSOR_ANOMALY, COMMUNICATION_ERROR, SENSOR_DEGRADATION, INSUFFICIENT_EVIDENCE
-- Evidence-based Confidence Score (0.0 to 1.0)
-- Severity Level (LOW, MEDIUM, HIGH, CRITICAL)
+- Evidence Strength: LOW, MEDIUM, HIGH
+- Severity: LOW, MEDIUM, HIGH, CRITICAL
 - Comprehensive Explainable Reasoning
 """
 
@@ -28,7 +28,8 @@ from app.models.schemas import (
     SpatialEvidence,
     MLEvidence,
     DecisionClassification,
-    SeverityLevel
+    SeverityLevel,
+    EvidenceStrength
 )
 
 
@@ -44,10 +45,10 @@ class AnomalyFusionEngine:
         spatial: SpatialEvidence,
         ml: MLEvidence,
         history_len: int = 24
-    ) -> Tuple[DecisionClassification, SeverityLevel, float, str]:
+    ) -> Tuple[DecisionClassification, SeverityLevel, float, EvidenceStrength, str]:
         """
-        Fuses multi-layered signals to produce a deterministic, explainable classification.
-        Returns: (decision, severity, confidence, explanation)
+        Fuses multi-layered evidence signals to produce an explainable, deterministic classification.
+        Returns: (decision, severity, confidence, evidence_strength, explanation)
         """
         
         # 1. Communication / Data Corruption Checks (Data Quality First)
@@ -56,18 +57,18 @@ class AnomalyFusionEngine:
             conf = 0.98
             severity = SeverityLevel.CRITICAL if "Physically impossible" in reasons else SeverityLevel.HIGH
             explanation = (
-                f"Data Corruption / Hardware Failure: {reasons}. "
-                "Raw readings violate physical meteorological boundary conditions."
+                f"Data Quality / Hardware Failure: {reasons}. "
+                "Raw telemetry breaches physical plausibility limits."
             )
-            return DecisionClassification.COMMUNICATION_ERROR, severity, conf, explanation
+            return DecisionClassification.COMMUNICATION_ERROR, severity, conf, EvidenceStrength.HIGH, explanation
 
         if dq.status == DataQualityStatus.MISSING:
             conf = 0.95
             severity = SeverityLevel.MEDIUM
             explanation = (
-                f"Communication Drop / Telemetry Loss: Missing sensor parameters ({', '.join(dq.flagged_parameters)})."
+                f"Missing Telemetry / Communication Drop: Incomplete parameter packet ({', '.join(dq.flagged_parameters)})."
             )
-            return DecisionClassification.COMMUNICATION_ERROR, severity, conf, explanation
+            return DecisionClassification.COMMUNICATION_ERROR, severity, conf, EvidenceStrength.HIGH, explanation
 
         # 2. Frozen Sensor Check
         if temporal.freeze_detected:
@@ -76,66 +77,68 @@ class AnomalyFusionEngine:
             severity = SeverityLevel.HIGH
             max_steps = max(temporal.frozen_duration_steps.values()) if temporal.frozen_duration_steps else 4
             explanation = (
-                f"Sensor Hardware Malfunction (Frozen Values): {', '.join(frozen_params)} sensor remained static "
-                f"without micro-fluctuations over {max_steps} intervals. "
-                "Atmospheric surface turbulence precludes zero-variance readings over extended periods."
+                f"Sensor Hardware Failure (Frozen Output): {', '.join(frozen_params)} sensor remained static "
+                f"across {max_steps} consecutive intervals. Natural atmospheric micro-turbulence precludes zero variance."
             )
-            return DecisionClassification.SENSOR_ANOMALY, severity, conf, explanation
+            return DecisionClassification.SENSOR_ANOMALY, severity, conf, EvidenceStrength.HIGH, explanation
 
-        # 3. Calibration Drift / Sensor Degradation Check
-        if temporal.drift_detected:
-            # Distinguish calibration drift from natural diurnal warming:
-            # A true sensor calibration drift diverges from neighboring stations (Delta >= 1.0).
-            max_spatial_dev = max([abs(v) for v in spatial.relative_deviations.values()] or [0.0])
-            if max_spatial_dev >= 1.0 or not spatial.is_consistent:
-                conf = 0.92
-                severity = SeverityLevel.MEDIUM
-                explanation = (
-                    "Sensor Degradation Pattern (Creeping Calibration Drift): Station displays continuous "
-                    f"monotonic drift ({temporal.explanation}) diverging from regional baseline (Delta={max_spatial_dev:+.1f}). "
-                    "Indicates gradual sensor transducer or amplifier decay."
-                )
-                return DecisionClassification.SENSOR_DEGRADATION, severity, conf, explanation
-
-        # 4. Regional Weather Event vs Isolated Sensor Anomaly
-        # Count positive corroborating anomaly signals
-        temporal_alert = temporal.spike_detected or temporal.drop_detected
+        # 3. Regional Weather Event vs Isolated Sensor Anomaly
+        temporal_alert = temporal.spike_detected or temporal.drop_detected or temporal.change_point_detected
         spatial_outlier = not spatial.is_consistent
         multivariate_discord = not multivariate.is_consistent
         ml_anomaly = ml.is_anomaly
 
         # CASE A: Regional Weather Event Corroboration
-        # Only evaluate as weather event if there is an elevated shift or alert corroborated across neighbors
-        if spatial.regional_event_detected and (temporal_alert or ml_anomaly or spatial_outlier):
+        # Corroborated when multiple neighboring stations show consistent directional shift
+        is_spatially_corroborated_event = (
+            spatial.regional_event_detected or 
+            (spatial.agreement_ratio >= 0.65 and spatial.corroborating_stations_count >= 2)
+        )
+        
+        if is_spatially_corroborated_event and not multivariate_discord:
             conf = 0.92
             severity = SeverityLevel.MEDIUM
             explanation = (
-                "Genuine Meteorological Event: Rapid atmospheric change detected, but confirmed by "
-                f"{spatial.neighbor_count} neighboring stations ({spatial.explanation}). "
-                "Multi-station coherence proves regional weather phenomenon (e.g. convective storm / heatburst / frontal passage)."
+                "Genuine Meteorological Event: Rapid atmospheric change detected, corroborated by "
+                f"{spatial.corroborating_stations_count} neighboring stations with agreement ratio {spatial.agreement_ratio:.2f} "
+                f"({spatial.explanation}). Multi-station spatial consensus confirms genuine mesoscale weather phenomenon."
             )
-            return DecisionClassification.WEATHER_EVENT, severity, conf, explanation
+            return DecisionClassification.WEATHER_EVENT, severity, conf, EvidenceStrength.HIGH, explanation
 
-        # If spatial neighbors report similar high/low values within normal tolerance
+        # 4. Calibration Drift / Sensor Degradation Check
+        # Isolated drift: station displays monotonic drift AND either deviates from spatial neighbors or spatial outlier
+        has_spatial_divergence = (
+            not spatial.is_consistent or 
+            abs(spatial.relative_deviations.get("temperature", 0.0)) >= 2.5 or
+            abs(spatial.relative_deviations.get("pressure", 0.0)) >= 2.0 or
+            abs(spatial.relative_deviations.get("humidity", 0.0)) >= 10.0 or
+            spatial.neighbor_count == 0
+        )
+        if temporal.drift_detected and has_spatial_divergence:
+            conf = 0.90
+            severity = SeverityLevel.MEDIUM
+            explanation = (
+                "Sensor Degradation Pattern (Calibration Drift): Station displays continuous "
+                f"monotonic drift ({temporal.explanation}) diverging from spatial baseline. "
+                "Indicates gradual sensor transducer or conditioning circuit decay."
+            )
+            return DecisionClassification.SENSOR_DEGRADATION, severity, conf, EvidenceStrength.HIGH, explanation
+
+        # If a minor local variation occurs but spatial neighbors are consistent and report comparable ranges
         max_spat_dev = max([abs(v) for v in spatial.relative_deviations.values()] or [0.0])
-        if temporal_alert and not temporal.drift_detected and spatial.is_consistent and max_spat_dev < 2.5 and spatial.neighbor_count >= 2:
-            # The station shifted, but nearby stations are also in similar range
-            conf = 0.86
+        if temporal_alert and not temporal.drift_detected and spatial.is_consistent and max_spat_dev < 2.5 and spatial.valid_neighbor_count >= 2:
+            conf = 0.90
             severity = SeverityLevel.LOW
             explanation = (
-                f"Regional Weather Fluctuation: Local parameter change ({temporal.explanation}) is corroborated "
-                f"by neighboring stations (relative deviation within {max_spat_dev:.1f}). "
-                "Classified as genuine atmospheric variation."
+                f"Normal Regional Fluctuation: Local parameter change ({temporal.explanation}) is consistent "
+                f"with neighboring station ranges (relative deviation within {max_spat_dev:.1f}). "
+                "Classified as normal atmospheric variation without sensor defect."
             )
-            return DecisionClassification.WEATHER_EVENT, severity, conf, explanation
+            return DecisionClassification.NORMAL, severity, conf, EvidenceStrength.HIGH, explanation
 
         # CASE B: Isolated Sensor Anomaly (Multi-Signal Corroboration)
-        # Abrupt spike + Isolated Spatial Outlier OR Multivariate Inconsistency + Spatial Outlier
-        # Must have local defect evidence (temporal spike/drop OR thermodynamic violation).
-        # A station at quiet baseline whose neighbors entered a storm should NOT be blamed!
         has_local_fault = temporal_alert or multivariate_discord or (dq.status != DataQualityStatus.VALID)
         if spatial_outlier and has_local_fault:
-            # Calculate evidence-based confidence
             evidence_points = 0.0
             evidence_items = []
             
@@ -144,18 +147,18 @@ class AnomalyFusionEngine:
                 evidence_items.append(f"Spatial Disagreement ({spatial.explanation})")
             if temporal_alert:
                 evidence_points += 0.30
-                evidence_items.append(f"Abrupt Temporal Deviation ({temporal.explanation})")
+                evidence_items.append(f"Temporal Excursion ({temporal.explanation})")
             if multivariate_discord:
                 evidence_points += 0.20
-                evidence_items.append(f"Thermodynamic/Multivariate Inconsistency ({multivariate.explanation})")
+                evidence_items.append(f"Multivariate Inconsistency ({multivariate.explanation})")
             if ml_anomaly:
                 evidence_points += 0.15
                 top_feat = list(ml.feature_contributions.keys())[:2] if ml.feature_contributions else []
-                evidence_items.append(f"ML Isolation Score ({ml.anomaly_score:.3f}, primary drivers: {', '.join(top_feat)})")
+                evidence_items.append(f"ML Anomaly Score ({ml.anomaly_score:.3f}, primary drivers: {', '.join(top_feat)})")
 
             conf = round(min(0.99, max(0.70, evidence_points + 0.10)), 2)
+            ev_strength = EvidenceStrength.HIGH if evidence_points >= 0.65 else EvidenceStrength.MEDIUM
             
-            # Severity determined by magnitude of spatial and temporal divergence
             max_spat_dev = max([abs(v) for v in spatial.relative_deviations.values()] or [0])
             if max_spat_dev > 15.0 or temporal.spike_detected:
                 severity = SeverityLevel.CRITICAL if max_spat_dev > 25.0 else SeverityLevel.HIGH
@@ -165,43 +168,34 @@ class AnomalyFusionEngine:
             explanation = (
                 f"Sensor Anomaly Detected: Station observation is uncorroborated by the observation network. "
                 f"Supporting evidence: 1) {'; 2) '.join(evidence_items)}. "
-                "Lack of spatial consensus and thermodynamic discord confirms observation-system failure."
+                "Lack of spatial consensus and/or physical discord confirms observation-system failure."
             )
-            return DecisionClassification.SENSOR_ANOMALY, severity, conf, explanation
+            return DecisionClassification.SENSOR_ANOMALY, severity, conf, ev_strength, explanation
 
-        # CASE C: Multivariate Inconsistency Alone (without spatial neighbors)
-        if multivariate_discord and not spatial_outlier:
-            if spatial.neighbor_count == 0:
-                conf = 0.72
-                severity = SeverityLevel.MEDIUM
-                explanation = (
-                    f"Probable Sensor Discrepancy: {multivariate.explanation}. "
-                    "However, neighbor stations are unavailable for spatial cross-validation."
-                )
-                return DecisionClassification.SENSOR_ANOMALY, severity, conf, explanation
-            else:
-                # Neighbors agree with the values, so it might be an unusual microclimate
-                conf = 0.60
-                severity = SeverityLevel.LOW
-                explanation = (
-                    f"Marginal Multivariate Anomaly: {multivariate.explanation}, but spatial neighbors observe similar ranges. "
-                    "Marked for watch."
-                )
-                return DecisionClassification.NORMAL, severity, conf, explanation
+        # CASE C: Multivariate Thermodynamic Violation Alone (e.g. dewpoint ceiling or impossible thermodynamic coupling)
+        if multivariate_discord:
+            conf = 0.90
+            severity = SeverityLevel.HIGH
+            explanation = (
+                f"Sensor Fault / Multivariate Inconsistency: {multivariate.explanation}. "
+                "Thermodynamic relationships between Temperature, Pressure, and Humidity physically violated."
+            )
+            return DecisionClassification.SENSOR_ANOMALY, severity, conf, EvidenceStrength.HIGH, explanation
 
         # CASE D: Insufficient Evidence Check
-        if history_len < 3 and spatial.neighbor_count == 0:
+        if history_len < 3 and spatial.valid_neighbor_count == 0:
             if temporal_alert or ml_anomaly:
                 conf = 0.45
                 severity = SeverityLevel.LOW
                 explanation = (
-                    "Insufficient Evidence: Reading appears unusual, but station history is brief (<3 timesteps) "
-                    "and no spatial neighbors are available within 150 km to corroborate."
+                    "Insufficient Evidence: Reading deviates from nominal range, but station history is brief (<3 timesteps) "
+                    "and no spatial neighbors are available within 150 km to cross-corroborate."
                 )
-                return DecisionClassification.INSUFFICIENT_EVIDENCE, severity, conf, explanation
+                return DecisionClassification.INSUFFICIENT_EVIDENCE, severity, conf, EvidenceStrength.LOW, explanation
 
         # CASE E: Default Normal Operating State
         conf = 0.95 if not ml_anomaly else 0.80
         severity = SeverityLevel.LOW
-        explanation = "All parameters exhibit natural diurnal variability, thermodynamic consistency, and regional consensus."
-        return DecisionClassification.NORMAL, severity, conf, explanation
+        ev_strength = EvidenceStrength.HIGH if not ml_anomaly else EvidenceStrength.MEDIUM
+        explanation = "All parameters exhibit natural diurnal variability, thermodynamic consistency, and regional spatial consensus."
+        return DecisionClassification.NORMAL, severity, conf, ev_strength, explanation

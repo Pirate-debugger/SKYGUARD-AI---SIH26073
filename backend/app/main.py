@@ -24,7 +24,10 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect, UploadFile, File, H
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import PlainTextResponse
 
-from app.config import VERSION_INFO, DB_PATH
+from app.config import (
+    VERSION_INFO, DB_PATH, PHYSICAL_LIMITS, MAX_RATE_OF_CHANGE_PER_MIN,
+    TEMPORAL_CONFIG, CUSUM_CONFIG, SPATIAL_CONFIG, OFFLINE_CONFIG
+)
 from app.models.schemas import (
     RawReading,
     ProcessedReading,
@@ -33,7 +36,10 @@ from app.models.schemas import (
     NetworkOverview,
     StreamInjectionPayload,
     StationMetadata,
-    SensorHealthStatus
+    SensorHealthStatus,
+    CommunicationState,
+    CsvIngestResult,
+    CsvRowError
 )
 from app.core.pipeline import SkyGuardPipeline
 from app.core.reporter import AnomalyReportGenerator
@@ -209,47 +215,163 @@ async def ingest_single_reading(reading: RawReading):
     }
 
 
-@app.post("/api/ingest/csv")
+@app.post("/api/ingest/batch")
+async def ingest_batch_readings(readings: List[RawReading]):
+    """Ingests a batch of observations across stations, evaluating via synchronized spatial snapshots."""
+    batch_results = pipeline.process_batch(readings)
+    for processed, alert in batch_results:
+        await db_manager.save_reading(processed)
+        if alert:
+            await db_manager.save_alert(alert)
+    return {
+        "status": "SUCCESS",
+        "count": len(batch_results),
+        "results": [p.model_dump() for p, _ in batch_results[:50]],
+        "alerts_generated": sum(1 for _, a in batch_results if a is not None)
+    }
+
+
+@app.post("/api/ingest/csv", response_model=CsvIngestResult)
 async def ingest_csv_file(file: UploadFile = File(...)):
-    """Ingests AWS CSV file containing station_id, timestamp, temperature, pressure, humidity."""
+    """
+    Ingests AWS CSV telemetry file.
+    Does NOT silently discard malformed rows. Returns records_received,
+    records_processed, records_failed, and detailed row errors.
+    """
     content = await file.read()
     try:
         text = content.decode("utf-8")
-        reader = csv.DictReader(io.StringIO(text))
+        reader = list(csv.DictReader(io.StringIO(text)))
     except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Failed to parse CSV: {str(e)}")
+        raise HTTPException(status_code=400, detail=f"Failed to parse CSV file: {str(e)}")
 
-    results = []
+    valid_readings: List[RawReading] = []
+    errors: List[CsvRowError] = []
+    row_num = 1  # 1-indexed (header is row 1, data starts row 2)
+
     for row in reader:
-        try:
-            st_id = row.get("station_id") or row.get("station") or "AWS-001"
-            ts = row.get("timestamp") or row.get("datetime") or datetime.now(timezone.utc).isoformat()
-            t_val = float(row["temperature"]) if row.get("temperature") not in (None, "", "null") else None
-            p_val = float(row["pressure"]) if row.get("pressure") not in (None, "", "null") else None
-            rh_val = float(row["humidity"]) if row.get("humidity") not in (None, "", "null") else None
+        row_num += 1
+        st_id = row.get("station_id") or row.get("station")
+        if not st_id or not st_id.strip():
+            errors.append(CsvRowError(
+                row_number=row_num,
+                column="station_id",
+                error_type="MISSING_STATION_ID",
+                message="station_id is empty or missing"
+            ))
+            continue
 
-            reading = RawReading(
-                station_id=st_id,
-                timestamp=ts,
-                temperature=t_val,
-                pressure=p_val,
-                humidity=rh_val
-            )
-            processed, alert = pipeline.process_reading(reading)
-            results.append({
-                "station_id": st_id,
-                "timestamp": ts,
+        ts = row.get("timestamp") or row.get("datetime")
+        if not ts or not ts.strip():
+            errors.append(CsvRowError(
+                row_number=row_num,
+                column="timestamp",
+                error_type="MISSING_TIMESTAMP",
+                message="timestamp is empty or missing"
+            ))
+            continue
+
+        try:
+            datetime.fromisoformat(ts.strip().replace("Z", "+00:00"))
+        except Exception:
+            errors.append(CsvRowError(
+                row_number=row_num,
+                column="timestamp",
+                error_type="INVALID_TIMESTAMP_FORMAT",
+                message=f"Invalid timestamp format: '{ts.strip()}'. Expected ISO-8601 (YYYY-MM-DDTHH:MM:SSZ)"
+            ))
+            continue
+
+        # Parse numeric parameters
+        t_val = None
+        p_val = None
+        rh_val = None
+        has_num_err = False
+
+        if row.get("temperature") not in (None, "", "null"):
+            try:
+                t_val = float(row["temperature"])
+            except ValueError:
+                errors.append(CsvRowError(
+                    row_number=row_num,
+                    column="temperature",
+                    error_type="INVALID_NUMERIC_FORMAT",
+                    message=f"Non-numeric temperature value: {row['temperature']}"
+                ))
+                has_num_err = True
+
+        if row.get("pressure") not in (None, "", "null"):
+            try:
+                p_val = float(row["pressure"])
+            except ValueError:
+                errors.append(CsvRowError(
+                    row_number=row_num,
+                    column="pressure",
+                    error_type="INVALID_NUMERIC_FORMAT",
+                    message=f"Non-numeric pressure value: {row['pressure']}"
+                ))
+                has_num_err = True
+
+        if row.get("humidity") not in (None, "", "null"):
+            try:
+                rh_val = float(row["humidity"])
+            except ValueError:
+                errors.append(CsvRowError(
+                    row_number=row_num,
+                    column="humidity",
+                    error_type="INVALID_NUMERIC_FORMAT",
+                    message=f"Non-numeric humidity value: {row['humidity']}"
+                ))
+                has_num_err = True
+
+        if has_num_err:
+            continue
+
+        valid_readings.append(RawReading(
+            station_id=st_id.strip(),
+            timestamp=ts.strip(),
+            temperature=t_val,
+            pressure=p_val,
+            humidity=rh_val
+        ))
+
+    # Process valid readings synchronously through pipeline
+    processed_results = []
+    if valid_readings:
+        batch_results = pipeline.process_batch(valid_readings)
+        for processed, alert in batch_results:
+            await db_manager.save_reading(processed)
+            if alert:
+                await db_manager.save_alert(alert)
+            processed_results.append({
+                "station_id": processed.station_id,
+                "timestamp": processed.timestamp,
                 "decision": processed.decision.value,
                 "probable_cause": processed.probable_cause.value,
                 "confidence": processed.confidence
             })
-        except Exception:
-            continue
 
+    return CsvIngestResult(
+        status="SUCCESS",
+        records_received=len(reader),
+        records_processed=len(valid_readings),
+        records_failed=len(errors),
+        errors=errors[:50],
+        sample_processed=processed_results[:50]
+    )
+
+
+# --- Configuration & Diagnostics ---
+@app.get("/api/diagnostics/config")
+async def get_system_diagnostics():
     return {
-        "status": "SUCCESS",
-        "records_processed": len(results),
-        "results": results[:50]
+        "version_info": VERSION_INFO.model_dump(),
+        "physical_limits": PHYSICAL_LIMITS,
+        "max_rates_of_change": MAX_RATE_OF_CHANGE_PER_MIN,
+        "temporal_config": TEMPORAL_CONFIG,
+        "cusum_config": CUSUM_CONFIG,
+        "spatial_config": SPATIAL_CONFIG,
+        "offline_config": OFFLINE_CONFIG
     }
 
 

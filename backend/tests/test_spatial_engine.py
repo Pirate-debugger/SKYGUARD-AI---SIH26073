@@ -45,7 +45,12 @@ def test_consistent_regional_weather_event():
     for s in [st1, st2, st3]:
         se.register_station(s)
         
-    # All stations experience high synoptic heat (43 - 44°C)
+    # Prior baseline readings in prev_readings (~34°C)
+    se.prev_readings["AWS-001"] = RawReading(station_id="AWS-001", timestamp="2026-09-29T09:55:00Z", temperature=34.0, pressure=1010.0, humidity=50.0)
+    se.prev_readings["AWS-002"] = RawReading(station_id="AWS-002", timestamp="2026-09-29T09:55:00Z", temperature=34.2, pressure=1010.0, humidity=50.0)
+    se.prev_readings["AWS-003"] = RawReading(station_id="AWS-003", timestamp="2026-09-29T09:55:00Z", temperature=33.8, pressure=1010.0, humidity=50.0)
+
+    # Neighbors report sudden surge to 43-44°C
     se.update_latest_reading(RawReading(station_id="AWS-002", timestamp="2026-09-29T10:00:00Z", temperature=43.5, pressure=1005.0, humidity=25.0))
     se.update_latest_reading(RawReading(station_id="AWS-003", timestamp="2026-09-29T10:00:00Z", temperature=44.2, pressure=1005.0, humidity=24.0))
     

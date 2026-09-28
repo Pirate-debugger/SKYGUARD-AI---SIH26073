@@ -4,7 +4,7 @@ SIH26073: Automatic Weather Station Anomaly Detection System
 
 Provides asynchronous persistence for:
 - Registered AWS Stations
-- Historical Ingested & Processed Readings
+- Historical Ingested & Processed Readings (with UNIQUE constraint on station_id + timestamp)
 - Active & Historical Anomaly Alerts
 - Station Health & Degradation Summaries
 """
@@ -22,7 +22,7 @@ class DatabaseManager:
         self.db_path = db_path
 
     async def init_db(self):
-        """Initializes tables and indices."""
+        """Initializes tables, unique constraints, and indices."""
         async with aiosqlite.connect(self.db_path) as db:
             await db.execute("""
             CREATE TABLE IF NOT EXISTS stations (
@@ -50,11 +50,15 @@ class DatabaseManager:
                 probable_cause TEXT NOT NULL,
                 severity TEXT NOT NULL,
                 confidence REAL NOT NULL,
+                evidence_strength TEXT NOT NULL,
                 explanation TEXT NOT NULL,
                 data_quality TEXT NOT NULL,
                 imputed_values TEXT,
                 model_version TEXT NOT NULL,
-                FOREIGN KEY(station_id) REFERENCES stations(station_id)
+                ruleset_version TEXT NOT NULL,
+                feature_version TEXT NOT NULL,
+                FOREIGN KEY(station_id) REFERENCES stations(station_id),
+                UNIQUE(station_id, timestamp)
             );
             """)
 
@@ -67,6 +71,7 @@ class DatabaseManager:
                 probable_cause TEXT NOT NULL,
                 severity TEXT NOT NULL,
                 confidence REAL NOT NULL,
+                evidence_strength TEXT NOT NULL,
                 flagged_parameters TEXT NOT NULL,
                 observed_values TEXT NOT NULL,
                 expected_values TEXT NOT NULL,
@@ -81,6 +86,27 @@ class DatabaseManager:
             await db.execute("CREATE INDEX IF NOT EXISTS idx_readings_station ON readings(station_id);")
             await db.execute("CREATE INDEX IF NOT EXISTS idx_readings_timestamp ON readings(timestamp);")
             await db.execute("CREATE INDEX IF NOT EXISTS idx_alerts_station ON alerts(station_id);")
+
+            # Safe column additions if migrating from previous prototype schema
+            for col, col_type in [
+                ("evidence_strength", "TEXT DEFAULT 'MEDIUM'"),
+                ("imputed_values", "TEXT DEFAULT '{}'"),
+                ("model_version", "TEXT DEFAULT 'v2.0.0'"),
+                ("ruleset_version", "TEXT DEFAULT 'v2.0.0'"),
+                ("feature_version", "TEXT DEFAULT 'v2.0.0'"),
+            ]:
+                try:
+                    await db.execute(f"ALTER TABLE readings ADD COLUMN {col} {col_type};")
+                except Exception:
+                    pass
+            for col, col_type in [
+                ("evidence_strength", "TEXT DEFAULT 'MEDIUM'"),
+            ]:
+                try:
+                    await db.execute(f"ALTER TABLE alerts ADD COLUMN {col} {col_type};")
+                except Exception:
+                    pass
+
             await db.commit()
 
     async def save_station(self, station: StationMetadata):
@@ -101,28 +127,32 @@ class DatabaseManager:
             ))
             await db.commit()
 
-    async def save_reading(self, reading: ProcessedReading):
+    async def save_reading(self, processed: ProcessedReading):
         async with aiosqlite.connect(self.db_path) as db:
+            imputed_json = json.dumps({k: v.model_dump() for k, v in processed.imputed_values.items()}) if processed.imputed_values else None
+            dq_json = json.dumps(processed.data_quality.model_dump())
             await db.execute("""
             INSERT OR REPLACE INTO readings
-            (reading_id, station_id, timestamp, temperature, pressure, humidity,
-             decision, probable_cause, severity, confidence, explanation, data_quality, imputed_values, model_version)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            (reading_id, station_id, timestamp, temperature, pressure, humidity, decision, probable_cause, severity, confidence, evidence_strength, explanation, data_quality, imputed_values, model_version, ruleset_version, feature_version)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
-                reading.reading_id,
-                reading.station_id,
-                reading.timestamp,
-                reading.temperature,
-                reading.pressure,
-                reading.humidity,
-                reading.decision.value,
-                reading.probable_cause.value,
-                reading.severity.value,
-                reading.confidence,
-                reading.explanation,
-                json.dumps(reading.data_quality.model_dump()),
-                json.dumps({k: v.model_dump() for k, v in reading.imputed_values.items()}),
-                reading.model_version
+                processed.reading_id,
+                processed.station_id,
+                processed.timestamp,
+                processed.temperature,
+                processed.pressure,
+                processed.humidity,
+                processed.decision.value,
+                processed.probable_cause.value,
+                processed.severity.value,
+                processed.confidence,
+                processed.evidence_strength.value,
+                processed.explanation,
+                dq_json,
+                imputed_json,
+                processed.model_version,
+                processed.ruleset_version,
+                processed.feature_version
             ))
             await db.commit()
 
@@ -130,9 +160,8 @@ class DatabaseManager:
         async with aiosqlite.connect(self.db_path) as db:
             await db.execute("""
             INSERT OR REPLACE INTO alerts
-            (alert_id, station_id, timestamp, decision, probable_cause, severity,
-             confidence, flagged_parameters, observed_values, expected_values, deviations, explanation, recommended_action, acknowledged)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            (alert_id, station_id, timestamp, decision, probable_cause, severity, confidence, evidence_strength, flagged_parameters, observed_values, expected_values, deviations, explanation, recommended_action, acknowledged)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 alert.alert_id,
                 alert.station_id,
@@ -141,6 +170,7 @@ class DatabaseManager:
                 alert.probable_cause.value,
                 alert.severity.value,
                 alert.confidence,
+                alert.evidence_strength.value,
                 json.dumps(alert.flagged_parameters),
                 json.dumps(alert.observed_values),
                 json.dumps(alert.expected_values),
@@ -151,38 +181,11 @@ class DatabaseManager:
             ))
             await db.commit()
 
-    async def get_all_stations(self) -> List[Dict[str, Any]]:
+    async def get_station_readings(self, station_id: str, limit: int = 50) -> List[Dict[str, Any]]:
         async with aiosqlite.connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
-            async with db.execute("SELECT * FROM stations ORDER BY station_id ASC") as cursor:
-                rows = await cursor.fetchall()
-                return [dict(row) for row in rows]
-
-    async def get_recent_readings(self, station_id: Optional[str] = None, limit: int = 50) -> List[Dict[str, Any]]:
-        async with aiosqlite.connect(self.db_path) as db:
-            db.row_factory = aiosqlite.Row
-            if station_id:
-                query = "SELECT * FROM readings WHERE station_id = ? ORDER BY timestamp DESC LIMIT ?"
-                params = (station_id, limit)
-            else:
-                query = "SELECT * FROM readings ORDER BY timestamp DESC LIMIT ?"
-                params = (limit,)
-            async with db.execute(query, params) as cursor:
-                rows = await cursor.fetchall()
-                return [dict(row) for row in rows]
-
-    async def get_recent_alerts(self, limit: int = 50) -> List[Dict[str, Any]]:
-        async with aiosqlite.connect(self.db_path) as db:
-            db.row_factory = aiosqlite.Row
-            async with db.execute("SELECT * FROM alerts ORDER BY timestamp DESC LIMIT ?", (limit,)) as cursor:
-                rows = await cursor.fetchall()
-                alerts = []
-                for row in rows:
-                    d = dict(row)
-                    d["flagged_parameters"] = json.loads(d["flagged_parameters"])
-                    d["observed_values"] = json.loads(d["observed_values"])
-                    d["expected_values"] = json.loads(d["expected_values"])
-                    d["deviations"] = json.loads(d["deviations"])
-                    d["acknowledged"] = bool(d["acknowledged"])
-                    alerts.append(d)
-                return alerts
+            cursor = await db.execute("""
+            SELECT * FROM readings WHERE station_id = ? ORDER BY timestamp DESC LIMIT ?
+            """, (station_id, limit))
+            rows = await cursor.fetchall()
+            return [dict(r) for r in reversed(rows)]

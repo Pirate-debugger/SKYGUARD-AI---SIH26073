@@ -2,29 +2,36 @@
 Temporal Analysis Engine for SkyGuard AI
 SIH26073: Automatic Weather Station Anomaly Detection System
 
-Analyzes single-station time-series behaviors:
-- Rolling mean, rolling median, rolling standard deviation
-- Rate of change (delta per minute)
-- Robust Z-score (based on Median Absolute Deviation - MAD)
-- Spike / Drop detection
-- Frozen sensor detection (persistent identical values)
-- Calibration drift detection (systematic monotonic slope)
-- Change-point detection
+Multi-timescale time-series analytics:
+- LEVEL 1 (Instantaneous): Rate of change (delta per minute), extreme jump detection
+- LEVEL 2 (Short-term): Rolling median, robust MAD z-score, frozen sensor detection
+- LEVEL 3 (Long-term / Trend): Diurnal baseline, linear drift regression, CUSUM change-point detection
+
+Strict Anti-Leakage Design:
+Evaluates telemetry strictly against pre-current history.
+Buffer update is decoupled via commit() called only after downstream analysis and imputation.
 """
 
 from collections import deque
 from datetime import datetime
 from typing import Dict, List, Optional, Tuple, Any
 import numpy as np
-from app.config import TEMPORAL_CONFIG, MAX_RATE_OF_CHANGE_PER_MIN
+from app.config import TEMPORAL_CONFIG, CUSUM_CONFIG, MAX_RATE_OF_CHANGE_PER_MIN
 from app.models.schemas import RawReading, TemporalEvidence
 
 
 class StationTemporalBuffer:
-    """Maintains a rolling historical buffer of readings for a specific station."""
+    """Maintains a rolling historical buffer of observations strictly before current timestep."""
     def __init__(self, maxlen: int = TEMPORAL_CONFIG["window_size"]):
         self.maxlen = maxlen
         self.history: deque = deque(maxlen=maxlen)
+        
+        # CUSUM state per parameter: param -> {"s_pos": float, "s_neg": float}
+        self.cusum_state: Dict[str, Dict[str, float]] = {
+            "temperature": {"s_pos": 0.0, "s_neg": 0.0},
+            "pressure": {"s_pos": 0.0, "s_neg": 0.0},
+            "humidity": {"s_pos": 0.0, "s_neg": 0.0}
+        }
 
     def add(self, reading: RawReading):
         self.history.append({
@@ -56,6 +63,10 @@ class TemporalEngine:
         return self.station_buffers[station_id]
 
     def analyze(self, reading: RawReading) -> TemporalEvidence:
+        """
+        Analyzes reading against PRE-CURRENT historical buffer.
+        Does NOT commit reading to buffer (commit is done via commit_reading).
+        """
         buffer = self.get_or_create_buffer(reading.station_id)
         
         rates_of_change: Dict[str, float] = {}
@@ -70,9 +81,11 @@ class TemporalEngine:
         freeze_detected = False
         drift_detected = False
         change_point_detected = False
+        change_point_param: Optional[str] = None
+        change_point_direction: Optional[str] = None
+        change_point_magnitude: Optional[float] = None
         
         reasons: List[str] = []
-        
         params = ["temperature", "pressure", "humidity"]
         
         for param in params:
@@ -82,15 +95,14 @@ class TemporalEngine:
                 
             history = buffer.get_parameter_series(param)
             
-            # If we have at least 1 prior reading, compute rate of change
+            # --- LEVEL 1: Instantaneous Rate of Change ---
             if len(history) >= 1:
                 last_val = history[-1]
-                # Calculate time delta in minutes
                 prev_ts_str = buffer.get_timestamps()[-1]
                 try:
                     t_curr = datetime.fromisoformat(reading.timestamp.replace("Z", "+00:00"))
                     t_prev = datetime.fromisoformat(prev_ts_str.replace("Z", "+00:00"))
-                    dt_min = max((t_curr - t_prev).total_seconds() / 60.0, 0.05) # avoid zero div
+                    dt_min = max((t_curr - t_prev).total_seconds() / 60.0, 0.05)
                 except Exception:
                     dt_min = 1.0
                 
@@ -98,21 +110,20 @@ class TemporalEngine:
                 rate_per_min = abs(delta) / dt_min
                 rates_of_change[param] = round(rate_per_min, 3)
                 
-                # Check against plausible rate of change
                 max_rate = MAX_RATE_OF_CHANGE_PER_MIN.get(param, 5.0)
                 if rate_per_min > max_rate:
                     if delta > 0:
                         spike_detected = True
                         reasons.append(
-                            f"Abrupt {param} spike: Delta={delta:+.1f} in {dt_min*60:.0f}s ({rate_per_min:.2f}/min > max {max_rate}/min)"
+                            f"Abrupt {param} spike: Delta={delta:+.1f} in {dt_min*60:.0f}s ({rate_per_min:.2f}/min > limit {max_rate}/min)"
                         )
                     else:
                         drop_detected = True
                         reasons.append(
-                            f"Abrupt {param} drop: Delta={delta:+.1f} in {dt_min*60:.0f}s ({rate_per_min:.2f}/min > max {max_rate}/min)"
+                            f"Abrupt {param} drop: Delta={delta:+.1f} in {dt_min*60:.0f}s ({rate_per_min:.2f}/min > limit {max_rate}/min)"
                         )
 
-            # If we have sufficient history, compute statistical metrics
+            # --- LEVEL 2: Short-term Rolling Robust Statistics ---
             if len(history) >= TEMPORAL_CONFIG["min_window_for_stats"]:
                 arr = np.array(history, dtype=float)
                 mean_val = float(np.mean(arr))
@@ -121,34 +132,53 @@ class TemporalEngine:
                 rolling_stds[param] = round(std_val, 2)
                 
                 # Robust Z-score using Median Absolute Deviation (MAD)
-                # MAD is robust to existing outliers in the buffer
                 median_val = float(np.median(arr))
                 mad = float(np.median(np.abs(arr - median_val)))
-                # Standard consistency factor for normal distribution: MAD * 1.4826 ~ std
-                mad_std = mad * 1.4826
+                mad_std = mad * 1.4826  # asymptotic normal consistency factor
                 
-                if mad_std > 1e-4:
-                    robust_z = (val - median_val) / mad_std
-                elif std_val > 1e-4:
-                    robust_z = (val - mean_val) / std_val
-                else:
-                    # History was virtually identical
-                    diff = abs(val - median_val)
-                    robust_z = (diff / 0.1) if diff > 0.1 else 0.0
-                    
+                # Floor on scale to prevent micro-fluctuations in quiet air from creating massive z-scores
+                min_scale_floor = 0.8 if param == "temperature" else (0.8 if param == "pressure" else 3.5)
+                effective_scale = max(mad_std if mad_std > 1e-4 else std_val, min_scale_floor)
+                robust_z = (val - median_val) / effective_scale
                 robust_z_scores[param] = round(float(robust_z), 2)
                 
-                if abs(robust_z) >= TEMPORAL_CONFIG["spike_z_threshold"]:
+                # Minimum absolute deviation requirement (meteorologically meaningful shift)
+                min_abs_dev = 2.5 if param == "temperature" else (2.0 if param == "pressure" else 8.0)
+                if abs(robust_z) >= TEMPORAL_CONFIG["spike_z_threshold"] and abs(val - median_val) >= min_abs_dev:
                     if robust_z > 0:
                         spike_detected = True
                     else:
                         drop_detected = True
                     reasons.append(
-                        f"Statistical temporal deviation in {param}: robust Z={robust_z:+.1f} "
-                        f"(Obs={val}, RollingMed={median_val:.1f})"
+                        f"Statistical temporal excursion in {param}: robust Z={robust_z:+.1f} "
+                        f"(Obs={val}, RollingMed={median_val:.1f}, Delta={val-median_val:+.1f})"
                     )
 
-            # Freeze Detection: Check if last N consecutive readings are identical
+                # --- LEVEL 3A: CUSUM Change-Point Detection ---
+                # Detects sustained mean shifts / sudden regime change
+                k = CUSUM_CONFIG["drift_allowance_k"]
+                h = CUSUM_CONFIG["decision_threshold_h"]
+                c_state = buffer.cusum_state.get(param, {"s_pos": 0.0, "s_neg": 0.0})
+                
+                norm_dev = (val - median_val) / effective_scale
+                s_pos = max(0.0, c_state["s_pos"] + (norm_dev - k))
+                s_neg = max(0.0, c_state["s_neg"] - (norm_dev + k))
+                
+                if abs(val - median_val) >= min_abs_dev:
+                    if s_pos > h:
+                        change_point_detected = True
+                        change_point_param = param
+                        change_point_direction = "INCREASE"
+                        change_point_magnitude = round(float(norm_dev), 2)
+                        reasons.append(f"CUSUM Change-Point in {param}: Abrupt upward regime shift (S+={s_pos:.1f} > {h})")
+                    elif s_neg > h:
+                        change_point_detected = True
+                        change_point_param = param
+                        change_point_direction = "DECREASE"
+                        change_point_magnitude = round(float(norm_dev), 2)
+                        reasons.append(f"CUSUM Change-Point in {param}: Abrupt downward regime shift (S-={s_neg:.1f} > {h})")
+
+            # --- LEVEL 2B: Frozen Sensor Detection ---
             consecutive_identical = 1
             for prev_v in reversed(history):
                 if abs(val - prev_v) < 1e-3:
@@ -163,32 +193,32 @@ class TemporalEngine:
                     f"Suspiciously frozen {param}: identical value {val} across {consecutive_identical} consecutive steps"
                 )
 
-            # Drift Detection: Linear trend analysis across window
-            if len(history) >= 6:
+            # --- LEVEL 3B: Calibration Drift (Monotonic Linear Trend) ---
+            if len(history) >= TEMPORAL_CONFIG["drift_min_steps"]:
                 combined = list(history) + [val]
-                x = np.arange(len(combined))
-                y = np.array(combined, dtype=float)
-                # Fit linear regression line y = slope * x + intercept
+                # Evaluate drift over recent trend window (up to 12 points) to avoid ancient baseline
+                w_slice = combined[-12:] if len(combined) > 12 else combined
+                x = np.arange(len(w_slice))
+                y = np.array(w_slice, dtype=float)
                 slope, _ = np.polyfit(x, y, 1)
                 trend_slopes[param] = round(float(slope), 4)
                 
-                # Check if slope shows continuous creeping drift while variance around line is small
                 y_pred = slope * x + np.mean(y) - slope * np.mean(x)
                 residuals_std = np.std(y - y_pred)
                 
-                # If slope is significant and residual jitter is low, indicates calibration drift
-                # Normalize slope by nominal parameter scale
                 nominal_scale = 30.0 if param == "temperature" else (50.0 if param == "humidity" else 20.0)
                 norm_slope = abs(slope) / nominal_scale
-                if norm_slope >= TEMPORAL_CONFIG["drift_slope_threshold"] and residuals_std < 0.8:
+                if norm_slope >= TEMPORAL_CONFIG["drift_slope_threshold"] and residuals_std < 1.2:
                     drift_detected = True
                     reasons.append(
-                        f"Calibration drift pattern in {param}: monotonic slope={slope:+.3f}/step over {len(combined)} points"
+                        f"Calibration drift pattern in {param}: monotonic slope={slope:+.3f}/step over {len(w_slice)} points"
                     )
 
-        # Update buffer with current reading
-        buffer.add(reading)
-        
+        # Monotonic calibration drift overrides statistical excursion spike when instant rate-of-change is normal
+        if drift_detected and not any(r > MAX_RATE_OF_CHANGE_PER_MIN.get(p, 5.0) for p, r in rates_of_change.items()):
+            spike_detected = False
+            drop_detected = False
+
         explanation = "; ".join(reasons) if reasons else "Temporal parameters within expected variance envelope"
         
         return TemporalEvidence(
@@ -197,6 +227,9 @@ class TemporalEngine:
             freeze_detected=freeze_detected,
             drift_detected=drift_detected,
             change_point_detected=change_point_detected,
+            change_point_param=change_point_param,
+            change_point_direction=change_point_direction,
+            change_point_magnitude=change_point_magnitude,
             rates_of_change=rates_of_change,
             rolling_means=rolling_means,
             rolling_stds=rolling_stds,
@@ -205,3 +238,35 @@ class TemporalEngine:
             trend_slopes=trend_slopes,
             explanation=explanation
         )
+
+    def commit_reading(self, reading: RawReading):
+        """
+        Commits reading to the historical rolling buffer and updates CUSUM state.
+        STRICT ANTI-LEAKAGE: MUST ONLY BE CALLED AFTER downstream analysis & imputation!
+        """
+        buffer = self.get_or_create_buffer(reading.station_id)
+        
+        # Update CUSUM running state if we have stats
+        for param in ["temperature", "pressure", "humidity"]:
+            val = getattr(reading, param, None)
+            if val is None or np.isnan(val):
+                continue
+            history = buffer.get_parameter_series(param)
+            if len(history) >= TEMPORAL_CONFIG["min_window_for_stats"]:
+                arr = np.array(history, dtype=float)
+                median_val = float(np.median(arr))
+                mad = float(np.median(np.abs(arr - median_val)))
+                scale = (mad * 1.4826) if (mad * 1.4826) > 1e-4 else (np.std(arr) if np.std(arr) > 1e-4 else 1.0)
+                norm_dev = (val - median_val) / scale
+                
+                k = CUSUM_CONFIG["drift_allowance_k"]
+                c_state = buffer.cusum_state[param]
+                c_state["s_pos"] = max(0.0, c_state["s_pos"] + (norm_dev - k))
+                c_state["s_neg"] = max(0.0, c_state["s_neg"] - (norm_dev + k))
+                # Reset if boundary breached
+                if c_state["s_pos"] > CUSUM_CONFIG["decision_threshold_h"]:
+                    c_state["s_pos"] = 0.0
+                if c_state["s_neg"] > CUSUM_CONFIG["decision_threshold_h"]:
+                    c_state["s_neg"] = 0.0
+        
+        buffer.add(reading)

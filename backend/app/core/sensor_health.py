@@ -5,22 +5,28 @@ SIH26073: Automatic Weather Station Anomaly Detection System
 Tracks sensor operational degradation over time:
 - Anomaly frequency within rolling operational window
 - Spike counts, frozen intervals, communication drops, drift trends
+- Time-since-last-observation offline / delay detection
+- Communication states: ONLINE, WARNING, COMMUNICATION_DELAY, OFFLINE
 - Composite Health Score (0 to 100)
 - Health States: HEALTHY, WATCH, DEGRADED, CRITICAL, OFFLINE
-- Degradation Signals: LOW, MODERATE, HIGH
+- Health Trends: IMPROVING, STABLE, DECLINING
+- Degradation Signals: LOW, MODERATE, HIGH (with explicit history threshold)
 - Maintenance Action Recommendations
 """
 
 from collections import deque
 from datetime import datetime, timezone
 from typing import Dict, List, Optional
+from app.config import OFFLINE_CONFIG
 from app.models.schemas import (
     SensorHealthStatus,
     SensorHealthSummary,
+    CommunicationState,
     MaintenanceRecommendation,
     DegradationLevel,
     DecisionClassification,
-    ProbableCause
+    ProbableCause,
+    EvidenceStrength
 )
 
 
@@ -29,13 +35,16 @@ class StationHealthTracker:
         self.station_id = station_id
         self.window_size = window_size
         self.recent_events: deque = deque(maxlen=window_size)
-        self.last_seen_ts: Optional[str] = None
+        self.last_seen_dt: Optional[datetime] = None
         self.consecutive_comm_failures = 0
         self.total_readings_processed = 0
 
     def record_reading_event(self, decision: DecisionClassification, probable_cause: ProbableCause, ts: str):
         self.total_readings_processed += 1
-        self.last_seen_ts = ts
+        try:
+            self.last_seen_dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+        except Exception:
+            self.last_seen_dt = datetime.now(timezone.utc)
         
         if decision == DecisionClassification.COMMUNICATION_ERROR:
             self.consecutive_comm_failures += 1
@@ -48,36 +57,92 @@ class StationHealthTracker:
             "probable_cause": probable_cause
         })
 
-    def evaluate_health(self) -> SensorHealthSummary:
-        now_iso = self.last_seen_ts or datetime.now(timezone.utc).isoformat()
+    def evaluate_health(self, current_time: Optional[datetime] = None) -> SensorHealthSummary:
+        now_dt = current_time or (self.last_seen_dt or datetime.now(timezone.utc))
+        now_iso = now_dt.isoformat()
         
-        # Check OFFLINE condition: 5+ consecutive missing packets
-        if self.consecutive_comm_failures >= 5:
+        # Calculate time since last observation
+        time_since_last_min = 0.0
+        missed_intervals = 0
+        expected_interval_min = OFFLINE_CONFIG["expected_reporting_interval_min"]
+        
+        if self.last_seen_dt:
+            delta_sec = (now_dt - self.last_seen_dt).total_seconds()
+            time_since_last_min = max(0.0, delta_sec / 60.0)
+            missed_intervals = int(time_since_last_min // expected_interval_min)
+
+        # Evaluate communication state
+        if missed_intervals >= OFFLINE_CONFIG["consecutive_missed_for_offline"] or self.consecutive_comm_failures >= 5 or time_since_last_min >= OFFLINE_CONFIG["offline_delay_min"]:
+            comm_state = CommunicationState.OFFLINE
+            status = SensorHealthStatus.OFFLINE
             return SensorHealthSummary(
                 station_id=self.station_id,
-                status=SensorHealthStatus.OFFLINE,
+                status=status,
+                communication_state=comm_state,
                 health_score=0.0,
                 degradation_signal=DegradationLevel.HIGH,
+                health_trend="DECLINING",
                 recent_spikes_count=0,
                 recent_frozen_intervals=0,
-                recent_comm_gaps=self.consecutive_comm_failures,
+                recent_comm_gaps=max(self.consecutive_comm_failures, missed_intervals),
+                missed_intervals=missed_intervals,
+                time_since_last_reading_min=round(time_since_last_min, 1),
                 drift_trend_detected=False,
                 maintenance_recommendation=MaintenanceRecommendation.INSPECT_COMMUNICATION_LINK,
-                summary_text=f"Telemetry lost for {self.consecutive_comm_failures} consecutive reporting cycles. Physical or RF transceiver failure suspected.",
+                summary_text=f"Telemetry lost for {time_since_last_min:.1f} minutes ({missed_intervals} expected cycles missed). Communication link or power failure suspected.",
+                last_updated=now_iso
+            )
+        elif missed_intervals >= 3 or time_since_last_min >= OFFLINE_CONFIG["comm_delay_min"]:
+            comm_state = CommunicationState.COMMUNICATION_DELAY
+        elif missed_intervals >= 1 or time_since_last_min >= OFFLINE_CONFIG["warning_delay_min"]:
+            comm_state = CommunicationState.WARNING
+        else:
+            comm_state = CommunicationState.ONLINE
+
+        # Insufficient history check
+        if self.total_readings_processed < 6:
+            return SensorHealthSummary(
+                station_id=self.station_id,
+                status=SensorHealthStatus.HEALTHY,
+                communication_state=comm_state,
+                health_score=95.0,
+                degradation_signal=DegradationLevel.LOW,
+                health_trend="STABLE",
+                recent_spikes_count=0,
+                recent_frozen_intervals=0,
+                recent_comm_gaps=0,
+                missed_intervals=missed_intervals,
+                time_since_last_reading_min=round(time_since_last_min, 1),
+                drift_trend_detected=False,
+                maintenance_recommendation=MaintenanceRecommendation.NO_ACTION,
+                summary_text="Insufficient history for degradation prediction; establishing baseline.",
                 last_updated=now_iso
             )
 
-        # Count occurrences in recent window
+        # Count occurrences in recent operational window
         spikes = sum(1 for e in self.recent_events if e["probable_cause"] == ProbableCause.SENSOR_SPIKE)
         freezes = sum(1 for e in self.recent_events if e["probable_cause"] == ProbableCause.SENSOR_FREEZE)
         drifts = sum(1 for e in self.recent_events if e["probable_cause"] == ProbableCause.CALIBRATION_DRIFT)
         comm_errors = sum(1 for e in self.recent_events if e["decision"] == DecisionClassification.COMMUNICATION_ERROR)
         anomalies = sum(1 for e in self.recent_events if e["decision"] == DecisionClassification.SENSOR_ANOMALY)
         
-        n_events = max(len(self.recent_events), 1)
-        anomaly_rate = anomalies / n_events
+        # Calculate health trend: compare recent 10 events vs earlier window
+        events_list = list(self.recent_events)
+        if len(events_list) >= 15:
+            recent_sub = events_list[-8:]
+            earlier_sub = events_list[:-8]
+            rec_anom_rate = sum(1 for e in recent_sub if e["decision"] != DecisionClassification.NORMAL) / len(recent_sub)
+            ear_anom_rate = sum(1 for e in earlier_sub if e["decision"] != DecisionClassification.NORMAL) / len(earlier_sub)
+            if rec_anom_rate > ear_anom_rate + 0.15:
+                trend = "DECLINING"
+            elif rec_anom_rate < ear_anom_rate - 0.15:
+                trend = "IMPROVING"
+            else:
+                trend = "STABLE"
+        else:
+            trend = "STABLE"
 
-        # Base health starts at 100
+        # Explainable Health Scoring
         score = 100.0
         score -= min(35.0, spikes * 7.0)
         score -= min(40.0, freezes * 12.0)
@@ -85,7 +150,7 @@ class StationHealthTracker:
         score -= min(25.0, comm_errors * 5.0)
         score = max(5.0, min(100.0, score))
         
-        # Determine degradation level
+        # Degradation Level
         if score > 85.0 and drifts == 0 and freezes == 0:
             deg_signal = DegradationLevel.LOW
         elif score > 60.0 or drifts > 0:
@@ -93,39 +158,43 @@ class StationHealthTracker:
         else:
             deg_signal = DegradationLevel.HIGH
 
-        # Determine health status and recommendation
+        # Maintenance Recommendation
         if score >= 90.0:
             status = SensorHealthStatus.HEALTHY
             rec = MaintenanceRecommendation.NO_ACTION
-            summary = "Station operating within optimal meteorological accuracy specifications."
+            summary = "Station operating within standard meteorological specifications."
         elif score >= 75.0:
             status = SensorHealthStatus.WATCH
             rec = MaintenanceRecommendation.CONTINUE_MONITORING
-            summary = f"Minor intermittent anomalies observed ({spikes} spikes, {comm_errors} packet drops). Baseline within acceptable margins."
+            summary = f"Intermittent minor anomalies observed ({spikes} spikes, {comm_errors} drops). Within acceptable watch tolerances."
         elif score >= 45.0:
             status = SensorHealthStatus.DEGRADED
             if drifts > 0:
                 rec = MaintenanceRecommendation.RECALIBRATION_RECOMMENDED
-                summary = f"Persistent calibration drift detected over recent operational cycles. Sensor recalibration recommended."
+                summary = "Persistent calibration drift detected. Sensor recalibration recommended."
             elif freezes > 0:
                 rec = MaintenanceRecommendation.REVIEW_SENSOR
-                summary = f"Repeated sensor freeze events ({freezes} times). Mechanical/ADC aspiration review advised."
+                summary = f"Repeated sensor freeze events ({freezes} occurrences). Hardware aspiration/ADC review advised."
             else:
                 rec = MaintenanceRecommendation.REVIEW_SENSOR
-                summary = f"Elevated anomaly frequency ({round(anomaly_rate*100, 1)}%). Component inspection advised."
+                summary = f"Elevated anomaly frequency ({anomalies} events in window). Component inspection advised."
         else:
             status = SensorHealthStatus.CRITICAL
             rec = MaintenanceRecommendation.MAINTENANCE_REQUIRED
-            summary = f"Multiple severe fault signatures ({spikes} spikes, {freezes} freezes, {drifts} drift periods). Urgent on-site maintenance required."
+            summary = f"Multiple severe fault signatures ({spikes} spikes, {freezes} freezes, {drifts} drift periods). On-site maintenance required."
 
         return SensorHealthSummary(
             station_id=self.station_id,
             status=status,
+            communication_state=comm_state,
             health_score=round(score, 1),
             degradation_signal=deg_signal,
+            health_trend=trend,
             recent_spikes_count=spikes,
             recent_frozen_intervals=freezes,
             recent_comm_gaps=comm_errors,
+            missed_intervals=missed_intervals,
+            time_since_last_reading_min=round(time_since_last_min, 1),
             drift_trend_detected=(drifts > 0),
             maintenance_recommendation=rec,
             summary_text=summary,
@@ -143,11 +212,15 @@ class SensorHealthEngine:
         return self.trackers[station_id]
 
     def update_and_get_health(
-        self, station_id: str, decision: DecisionClassification, probable_cause: ProbableCause, ts: str
+        self,
+        station_id: str,
+        decision: DecisionClassification,
+        probable_cause: ProbableCause,
+        ts: str
     ) -> SensorHealthSummary:
         tracker = self.get_or_create_tracker(station_id)
         tracker.record_reading_event(decision, probable_cause, ts)
         return tracker.evaluate_health()
 
-    def get_all_health_summaries(self) -> Dict[str, SensorHealthSummary]:
-        return {st_id: tracker.evaluate_health() for st_id, tracker in self.trackers.items()}
+    def get_all_health_summaries(self, current_time: Optional[datetime] = None) -> Dict[str, SensorHealthSummary]:
+        return {st_id: tracker.evaluate_health(current_time) for st_id, tracker in self.trackers.items()}

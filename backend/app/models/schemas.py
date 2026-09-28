@@ -1,6 +1,10 @@
 """
 Pydantic Schemas for SkyGuard AI
 SIH26073: Automatic Weather Station Anomaly Detection System
+
+All schemas enforce transparent, evidence-based meteorological data quality,
+spatial-temporal tracking, explainability without unsupported probability claims,
+and deterministic sensor health monitoring.
 """
 
 from typing import Optional, List, Dict, Any
@@ -43,6 +47,19 @@ class SensorHealthStatus(str, Enum):
     DEGRADED = "DEGRADED"
     CRITICAL = "CRITICAL"
     OFFLINE = "OFFLINE"
+
+
+class CommunicationState(str, Enum):
+    ONLINE = "ONLINE"
+    WARNING = "WARNING"
+    COMMUNICATION_DELAY = "COMMUNICATION_DELAY"
+    OFFLINE = "OFFLINE"
+
+
+class EvidenceStrength(str, Enum):
+    LOW = "LOW"
+    MEDIUM = "MEDIUM"
+    HIGH = "HIGH"
 
 
 class MaintenanceRecommendation(str, Enum):
@@ -104,6 +121,9 @@ class TemporalEvidence(BaseModel):
     freeze_detected: bool = False
     drift_detected: bool = False
     change_point_detected: bool = False
+    change_point_param: Optional[str] = None
+    change_point_direction: Optional[str] = None
+    change_point_magnitude: Optional[float] = None
     rates_of_change: Dict[str, float] = {}  # parameter -> value/min
     rolling_means: Dict[str, float] = {}
     rolling_stds: Dict[str, float] = {}
@@ -124,27 +144,31 @@ class MultivariateEvidence(BaseModel):
 class SpatialEvidence(BaseModel):
     is_consistent: bool = True
     neighbor_count: int = 0
+    valid_neighbor_count: int = 0
     neighbor_station_ids: List[str] = []
     neighbor_medians: Dict[str, float] = {}
     neighbor_mads: Dict[str, float] = {}
     relative_deviations: Dict[str, float] = {}
+    agreement_ratio: float = 0.0
+    corroborating_stations_count: int = 0
+    directional_agreement: bool = False
     regional_event_detected: bool = False
     explanation: str = ""
 
 
 class MLEvidence(BaseModel):
     is_anomaly: bool = False
-    anomaly_score: float = 0.0  # Negative = more anomalous in Isolation Forest, normalized 0..1
+    anomaly_score: float = 0.0  # Normalized anomaly index (0..1, higher = more unusual)
     confidence: float = 0.0
-    feature_contributions: Dict[str, float] = {}
-    model_name: str = "IsolationForest-v1.4.0"
+    feature_contributions: Dict[str, float] = {}  # Standardized feature contribution (distance-based attribution)
+    model_name: str = "IsolationForest-v2.0.0"
 
 
 class ImputedValue(BaseModel):
     parameter: str
     original_value: Optional[float]
     estimated_value: float
-    method: str = "Spatial-Temporal Inverse Distance Weighting"
+    method: str = "Spatial Inverse Distance Weighting + Temporal Persistence"
     confidence: float
     is_imputed: bool = True
 
@@ -157,7 +181,7 @@ class ProcessedReading(BaseModel):
     pressure: Optional[float] = None
     humidity: Optional[float] = None
     
-    # Analysis outputs
+    # Layered Analysis Outputs
     data_quality: DataQualityResult
     temporal_evidence: TemporalEvidence
     multivariate_evidence: MultivariateEvidence
@@ -169,6 +193,7 @@ class ProcessedReading(BaseModel):
     probable_cause: ProbableCause
     severity: SeverityLevel
     confidence: float = Field(ge=0.0, le=1.0)
+    evidence_strength: EvidenceStrength = EvidenceStrength.MEDIUM
     explanation: str
     
     # Imputation (optional corrected values)
@@ -188,6 +213,7 @@ class AlertRecord(BaseModel):
     probable_cause: ProbableCause
     severity: SeverityLevel
     confidence: float
+    evidence_strength: EvidenceStrength = EvidenceStrength.MEDIUM
     flagged_parameters: List[str]
     observed_values: Dict[str, Optional[float]]
     expected_values: Dict[str, Optional[float]]
@@ -202,11 +228,15 @@ class AlertRecord(BaseModel):
 class SensorHealthSummary(BaseModel):
     station_id: str
     status: SensorHealthStatus
-    health_score: float = Field(ge=0.0, le=100.0) # 100 = perfect, 0 = offline/failing
+    communication_state: CommunicationState = CommunicationState.ONLINE
+    health_score: float = Field(ge=0.0, le=100.0)  # 100 = perfect, 0 = failing/offline
     degradation_signal: DegradationLevel
+    health_trend: str = "STABLE"  # "IMPROVING", "STABLE", "DECLINING"
     recent_spikes_count: int = 0
     recent_frozen_intervals: int = 0
     recent_comm_gaps: int = 0
+    missed_intervals: int = 0
+    time_since_last_reading_min: float = 0.0
     drift_trend_detected: bool = False
     maintenance_recommendation: MaintenanceRecommendation
     summary_text: str
@@ -232,3 +262,19 @@ class StreamInjectionPayload(BaseModel):
     target_parameter: Optional[str] = "temperature"
     duration_steps: int = 5
     magnitude: Optional[float] = None
+
+
+class CsvRowError(BaseModel):
+    row_number: int
+    column: Optional[str] = None
+    error_type: str
+    message: str
+
+
+class CsvIngestResult(BaseModel):
+    status: str
+    records_received: int
+    records_processed: int
+    records_failed: int
+    errors: List[CsvRowError] = []
+    sample_processed: List[Dict[str, Any]] = []

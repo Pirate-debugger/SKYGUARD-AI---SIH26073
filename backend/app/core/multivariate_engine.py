@@ -74,6 +74,12 @@ class MultivariateConsistencyEngine:
                 reasons.append(
                     f"Thermodynamic violation: Computed Dewpoint ({dewpoint:.1f}°C) exceeds Air Temperature ({t:.1f}°C)"
                 )
+            elif dewpoint > 35.0: # Global Earth physical ceiling for surface air
+                is_consistent = False
+                discordant_params.extend(["temperature", "humidity"])
+                reasons.append(
+                    f"Atmospheric thermodynamic ceiling breached: Computed Dewpoint ({dewpoint:.1f}°C) exceeds terrestrial limit (35.0°C)"
+                )
 
         # 2. Multivariate Dynamic Coupling check (if previous reading is available)
         # In natural atmosphere, a massive abrupt rise in temperature (e.g. > +15°C)
@@ -109,12 +115,12 @@ class MultivariateConsistencyEngine:
             m_dist = 0.0
 
         # Mahalanobis threshold for 3 degrees of freedom:
-        # Chi-square critical value at p=0.001 is ~16.27 (distance ~4.03)
-        # Extreme multivariate outliers have distance > 5.0
-        if m_dist > 5.5:
+        # Chi-square critical value at p=0.005 is ~12.84 (distance ~3.58)
+        # Outliers have distance > 4.5
+        if m_dist > 4.5:
             is_consistent = False
             reasons.append(
-                f"Statistical multivariate discordance: Mahalanobis distance = {m_dist:.2f} (Threshold 5.5)"
+                f"Statistical multivariate discordance: Mahalanobis distance = {m_dist:.2f} (Threshold 4.5)"
             )
             # Identify which component contributes most to the distance
             comp_contributions = np.abs(diff) / np.sqrt(np.diag(self.cov_matrix))

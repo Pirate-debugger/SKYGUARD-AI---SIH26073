@@ -3,8 +3,8 @@ Live Stream Simulator & Injection Manager for SkyGuard AI
 SIH26073: Automatic Weather Station Anomaly Detection System
 
 Controls real-time continuous AWS telemetry streaming:
-- Start / Stop streaming
-- Configurable broadcast rate (default 2 seconds / tick)
+- Synchronized multi-station tick broadcasting
+- Batch same-timestamp pipeline ingestion
 - Real-time fault injection on any station (Spike, Freeze, Drift, Comm Gap, Weather Event, etc.)
 - Event broadcasting to subscribed WebSocket clients and pipeline orchestrator
 """
@@ -28,7 +28,7 @@ class StreamSimulatorManager:
             self.pipeline.spatial_engine.register_station(st)
             
         self.is_running: bool = False
-        self.tick_interval: float = 2.0 # seconds
+        self.tick_interval: float = 2.0  # seconds
         self.current_sim_time = datetime(2026, 9, 29, 10, 0, 0)
         self.tick_count = 0
         self.task: Optional[asyncio.Task] = None
@@ -61,7 +61,7 @@ class StreamSimulatorManager:
         """Queues a deterministic anomaly injection for real-time demonstration."""
         station_id = injection.station_id
         
-        # If Regional Weather Event, apply to all stations in that station's region!
+        # If Regional Weather Event, apply to all stations in that station's region
         if injection.anomaly_type == "WEATHER_EVENT":
             target_st = next((s for s in self.stations if s.station_id == station_id), None)
             target_region = target_st.region if target_st else "NCR Zone"
@@ -97,7 +97,6 @@ class StreamSimulatorManager:
             self.task = None
 
     async def _run_loop(self):
-        """Simulation tick loop: emits readings for all AWS stations sequentially or concurrently."""
         while self.is_running:
             try:
                 await self.tick_step()
@@ -109,12 +108,14 @@ class StreamSimulatorManager:
                 await asyncio.sleep(self.tick_interval)
 
     async def tick_step(self):
-        """Executes a single simulation step across the station network."""
+        """
+        Executes a single simulation step across the station network.
+        Processes all stations synchronously via pipeline.process_batch.
+        """
         self.tick_count += 1
         self.current_sim_time += timedelta(minutes=5)
         
-        step_readings = []
-        step_alerts = []
+        step_raw_readings: List[RawReading] = []
         
         for station in self.stations:
             st_id = station.station_id
@@ -132,7 +133,6 @@ class StreamSimulatorManager:
                 if self.injection_remaining_steps[st_id] <= 0:
                     del self.active_injections[st_id]
                     del self.injection_remaining_steps[st_id]
-                    # Reset frozen / drift state in generator
                     self.generator.station_state[st_id]["frozen_val"] = None
                     self.generator.station_state[st_id]["drift_offset"] = 0.0
 
@@ -142,11 +142,13 @@ class StreamSimulatorManager:
                 force_scenario=forced_scenario,
                 magnitude=magnitude
             )
+            step_raw_readings.append(raw_reading)
 
-            processed, alert = self.pipeline.process_reading(raw_reading)
-            step_readings.append(processed.model_dump())
-            if alert:
-                step_alerts.append(alert.model_dump())
+        # Batch synchronous evaluation across synchronized spatial snapshot
+        batch_results = self.pipeline.process_batch(step_raw_readings)
+        
+        step_readings = [p.model_dump() for p, _ in batch_results]
+        step_alerts = [a.model_dump() for _, a in batch_results if a]
 
         # Broadcast update to web clients
         packet = {

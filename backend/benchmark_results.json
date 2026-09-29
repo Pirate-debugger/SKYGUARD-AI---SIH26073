@@ -1,0 +1,1082 @@
+{
+  "benchmark_timestamp": "2026-09-29T13:08:21.432199+00:00",
+  "total_seeds": 5,
+  "seeds_evaluated": [
+    42,
+    43,
+    44,
+    45,
+    46
+  ],
+  "observations_per_seed": 4320,
+  "overall_accuracy": {
+    "mean": 0.8947222222222223,
+    "std": 0.0018885257457750854,
+    "min": 0.893287037037037,
+    "max": 0.8983796296296296
+  },
+  "macro_f1": {
+    "mean": 0.7157772911417173,
+    "std": 0.0032355055150942815,
+    "min": 0.7121261870036716,
+    "max": 0.7209885426341466
+  },
+  "macro_precision": {
+    "mean": 0.7129708939342047,
+    "std": 0.004394647543386873,
+    "min": 0.7080390591279657,
+    "max": 0.7207936989294865
+  },
+  "macro_recall": {
+    "mean": 0.7281288006642685,
+    "std": 0.0026160313469579567,
+    "min": 0.725040792114979,
+    "max": 0.7317060252826663
+  },
+  "weather_to_sensor_false_alarm_rate": {
+    "mean": 0.17555555555555555,
+    "std": 0.015947444549341473,
+    "min": 0.15,
+    "max": 0.19444444444444445
+  },
+  "sensor_to_weather_error_rate": {
+    "mean": 0.0036641221374045805,
+    "std": 0.000747935799323108,
+    "min": 0.0030534351145038168,
+    "max": 0.004580152671755725
+  },
+  "normal_to_weather_rate": {
+    "mean": 0.032654232424677195,
+    "std": 0.001288375570768647
+  },
+  "false_fault_rate_per_1000": {
+    "mean": 28.15825375170532,
+    "std": 2.0080075844992193
+  },
+  "mean_latency_ms": 15.048186134490944,
+  "p95_latency_ms": 16.001597586146097,
+  "seed_runs": [
+    {
+      "seed": 42,
+      "total_observations": 4320,
+      "overall_accuracy": 0.8935185185185185,
+      "macro_precision": 0.7108926111685467,
+      "macro_recall": 0.725040792114979,
+      "macro_f1": 0.7133106051708923,
+      "normal_to_weather_rate": 0.0321377331420373,
+      "weather_to_sensor_rate": 0.18888888888888888,
+      "sensor_to_weather_rate": 0.004580152671755725,
+      "false_fault_rate_per_1000": 30.28649386084584,
+      "mean_latency_ms": 15.903680671208011,
+      "p95_latency_ms": 18.821748755969274,
+      "per_class": {
+        "NORMAL": {
+          "precision": 0.9537037037037037,
+          "recall": 0.9457675753228121,
+          "f1": 0.9497190606540845,
+          "support": 3485
+        },
+        "REGIONAL_WEATHER_EVENT": {
+          "precision": 0.3539325842696629,
+          "recall": 0.35,
+          "f1": 0.3519553072625698,
+          "support": 180
+        },
+        "SENSOR_SPIKE": {
+          "precision": 0.512,
+          "recall": 0.6808510638297872,
+          "f1": 0.5844748858447488,
+          "support": 94
+        },
+        "SENSOR_FREEZE": {
+          "precision": 1.0,
+          "recall": 0.96875,
+          "f1": 0.9841269841269841,
+          "support": 96
+        },
+        "CALIBRATION_DRIFT": {
+          "precision": 0.2926829268292683,
+          "recall": 0.42857142857142855,
+          "f1": 0.34782608695652173,
+          "support": 84
+        },
+        "COMMUNICATION_FAILURE": {
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0,
+          "support": 112
+        },
+        "DATA_CORRUPTION": {
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0,
+          "support": 95
+        },
+        "MULTIVARIATE_INCONSISTENCY": {
+          "precision": 1.0,
+          "recall": 0.9886363636363636,
+          "f1": 0.9942857142857142,
+          "support": 88
+        },
+        "SPATIAL_INCONSISTENCY": {
+          "precision": 0.2857142857142857,
+          "recall": 0.16279069767441862,
+          "f1": 0.2074074074074074,
+          "support": 86
+        },
+        "INSUFFICIENT_EVIDENCE": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "support": 0
+        }
+      },
+      "confusion_matrix": [
+        [
+          3296,
+          112,
+          2,
+          0,
+          51,
+          0,
+          0,
+          0,
+          22,
+          2
+        ],
+        [
+          83,
+          63,
+          5,
+          0,
+          23,
+          0,
+          0,
+          0,
+          6,
+          0
+        ],
+        [
+          19,
+          3,
+          64,
+          0,
+          8,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        [
+          0,
+          0,
+          0,
+          93,
+          3,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        [
+          38,
+          0,
+          3,
+          0,
+          36,
+          0,
+          0,
+          0,
+          7,
+          0
+        ],
+        [
+          0,
+          0,
+          0,
+          0,
+          0,
+          112,
+          0,
+          0,
+          0,
+          0
+        ],
+        [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          95,
+          0,
+          0,
+          0
+        ],
+        [
+          0,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0,
+          87,
+          0,
+          0
+        ],
+        [
+          20,
+          0,
+          51,
+          0,
+          1,
+          0,
+          0,
+          0,
+          14,
+          0
+        ],
+        [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ]
+      ],
+      "classes": [
+        "NORMAL",
+        "REGIONAL_WEATHER_EVENT",
+        "SENSOR_SPIKE",
+        "SENSOR_FREEZE",
+        "CALIBRATION_DRIFT",
+        "COMMUNICATION_FAILURE",
+        "DATA_CORRUPTION",
+        "MULTIVARIATE_INCONSISTENCY",
+        "SPATIAL_INCONSISTENCY",
+        "INSUFFICIENT_EVIDENCE"
+      ]
+    },
+    {
+      "seed": 43,
+      "total_observations": 4320,
+      "overall_accuracy": 0.89375,
+      "macro_precision": 0.7107762727098411,
+      "macro_recall": 0.7278386418973044,
+      "macro_f1": 0.714593592164263,
+      "normal_to_weather_rate": 0.033285509325681494,
+      "weather_to_sensor_rate": 0.17777777777777778,
+      "sensor_to_weather_rate": 0.0030534351145038168,
+      "false_fault_rate_per_1000": 28.922237380627557,
+      "mean_latency_ms": 14.824691736565136,
+      "p95_latency_ms": 15.210942912866209,
+      "per_class": {
+        "NORMAL": {
+          "precision": 0.9536903039073806,
+          "recall": 0.945480631276901,
+          "f1": 0.9495677233429394,
+          "support": 3485
+        },
+        "REGIONAL_WEATHER_EVENT": {
+          "precision": 0.34444444444444444,
+          "recall": 0.34444444444444444,
+          "f1": 0.34444444444444444,
+          "support": 180
+        },
+        "SENSOR_SPIKE": {
+          "precision": 0.5196850393700787,
+          "recall": 0.7021276595744681,
+          "f1": 0.5972850678733032,
+          "support": 94
+        },
+        "SENSOR_FREEZE": {
+          "precision": 1.0,
+          "recall": 0.9895833333333334,
+          "f1": 0.9947643979057591,
+          "support": 96
+        },
+        "CALIBRATION_DRIFT": {
+          "precision": 0.30833333333333335,
+          "recall": 0.44047619047619047,
+          "f1": 0.36274509803921573,
+          "support": 84
+        },
+        "COMMUNICATION_FAILURE": {
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0,
+          "support": 112
+        },
+        "DATA_CORRUPTION": {
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0,
+          "support": 95
+        },
+        "MULTIVARIATE_INCONSISTENCY": {
+          "precision": 1.0,
+          "recall": 0.9772727272727273,
+          "f1": 0.9885057471264368,
+          "support": 88
+        },
+        "SPATIAL_INCONSISTENCY": {
+          "precision": 0.2708333333333333,
+          "recall": 0.1511627906976744,
+          "f1": 0.19402985074626866,
+          "support": 86
+        },
+        "INSUFFICIENT_EVIDENCE": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "support": 0
+        }
+      },
+      "confusion_matrix": [
+        [
+          3295,
+          116,
+          2,
+          0,
+          48,
+          0,
+          0,
+          0,
+          22,
+          2
+        ],
+        [
+          86,
+          62,
+          4,
+          0,
+          22,
+          0,
+          0,
+          0,
+          6,
+          0
+        ],
+        [
+          19,
+          2,
+          66,
+          0,
+          7,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        [
+          0,
+          0,
+          0,
+          95,
+          1,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        [
+          38,
+          0,
+          2,
+          0,
+          37,
+          0,
+          0,
+          0,
+          7,
+          0
+        ],
+        [
+          0,
+          0,
+          0,
+          0,
+          0,
+          112,
+          0,
+          0,
+          0,
+          0
+        ],
+        [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          95,
+          0,
+          0,
+          0
+        ],
+        [
+          0,
+          0,
+          0,
+          0,
+          2,
+          0,
+          0,
+          86,
+          0,
+          0
+        ],
+        [
+          17,
+          0,
+          53,
+          0,
+          3,
+          0,
+          0,
+          0,
+          13,
+          0
+        ],
+        [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ]
+      ],
+      "classes": [
+        "NORMAL",
+        "REGIONAL_WEATHER_EVENT",
+        "SENSOR_SPIKE",
+        "SENSOR_FREEZE",
+        "CALIBRATION_DRIFT",
+        "COMMUNICATION_FAILURE",
+        "DATA_CORRUPTION",
+        "MULTIVARIATE_INCONSISTENCY",
+        "SPATIAL_INCONSISTENCY",
+        "INSUFFICIENT_EVIDENCE"
+      ]
+    },
+    {
+      "seed": 44,
+      "total_observations": 4320,
+      "overall_accuracy": 0.8946759259259259,
+      "macro_precision": 0.7080390591279657,
+      "macro_recall": 0.7256021581658911,
+      "macro_f1": 0.7121261870036716,
+      "normal_to_weather_rate": 0.033285509325681494,
+      "weather_to_sensor_rate": 0.15,
+      "sensor_to_weather_rate": 0.0030534351145038168,
+      "false_fault_rate_per_1000": 25.37517053206003,
+      "mean_latency_ms": 14.84111768570276,
+      "p95_latency_ms": 15.200926255784013,
+      "per_class": {
+        "NORMAL": {
+          "precision": 0.9502301495972382,
+          "recall": 0.9477761836441894,
+          "f1": 0.9490015802327252,
+          "support": 3485
+        },
+        "REGIONAL_WEATHER_EVENT": {
+          "precision": 0.32954545454545453,
+          "recall": 0.32222222222222224,
+          "f1": 0.3258426966292135,
+          "support": 180
+        },
+        "SENSOR_SPIKE": {
+          "precision": 0.5354330708661418,
+          "recall": 0.723404255319149,
+          "f1": 0.6153846153846154,
+          "support": 94
+        },
+        "SENSOR_FREEZE": {
+          "precision": 1.0,
+          "recall": 0.9791666666666666,
+          "f1": 0.9894736842105264,
+          "support": 96
+        },
+        "CALIBRATION_DRIFT": {
+          "precision": 0.35714285714285715,
+          "recall": 0.47619047619047616,
+          "f1": 0.40816326530612246,
+          "support": 84
+        },
+        "COMMUNICATION_FAILURE": {
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0,
+          "support": 112
+        },
+        "DATA_CORRUPTION": {
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0,
+          "support": 95
+        },
+        "MULTIVARIATE_INCONSISTENCY": {
+          "precision": 1.0,
+          "recall": 0.9886363636363636,
+          "f1": 0.9942857142857142,
+          "support": 88
+        },
+        "SPATIAL_INCONSISTENCY": {
+          "precision": 0.2,
+          "recall": 0.09302325581395349,
+          "f1": 0.12698412698412698,
+          "support": 86
+        },
+        "INSUFFICIENT_EVIDENCE": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "support": 0
+        }
+      },
+      "confusion_matrix": [
+        [
+          3303,
+          116,
+          2,
+          0,
+          40,
+          0,
+          0,
+          0,
+          23,
+          1
+        ],
+        [
+          95,
+          58,
+          4,
+          0,
+          19,
+          0,
+          0,
+          0,
+          4,
+          0
+        ],
+        [
+          20,
+          2,
+          68,
+          0,
+          4,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        [
+          0,
+          0,
+          0,
+          94,
+          2,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        [
+          38,
+          0,
+          1,
+          0,
+          40,
+          0,
+          0,
+          0,
+          5,
+          0
+        ],
+        [
+          0,
+          0,
+          0,
+          0,
+          0,
+          112,
+          0,
+          0,
+          0,
+          0
+        ],
+        [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          95,
+          0,
+          0,
+          0
+        ],
+        [
+          0,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0,
+          87,
+          0,
+          0
+        ],
+        [
+          20,
+          0,
+          52,
+          0,
+          6,
+          0,
+          0,
+          0,
+          8,
+          0
+        ],
+        [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ]
+      ],
+      "classes": [
+        "NORMAL",
+        "REGIONAL_WEATHER_EVENT",
+        "SENSOR_SPIKE",
+        "SENSOR_FREEZE",
+        "CALIBRATION_DRIFT",
+        "COMMUNICATION_FAILURE",
+        "DATA_CORRUPTION",
+        "MULTIVARIATE_INCONSISTENCY",
+        "SPATIAL_INCONSISTENCY",
+        "INSUFFICIENT_EVIDENCE"
+      ]
+    },
+    {
+      "seed": 45,
+      "total_observations": 4320,
+      "overall_accuracy": 0.8983796296296296,
+      "macro_precision": 0.7207936989294865,
+      "macro_recall": 0.7304563858605018,
+      "macro_f1": 0.7209885426341466,
+      "normal_to_weather_rate": 0.030416068866571017,
+      "weather_to_sensor_rate": 0.16666666666666666,
+      "sensor_to_weather_rate": 0.004580152671755725,
+      "false_fault_rate_per_1000": 26.193724420190996,
+      "mean_latency_ms": 14.890751574124874,
+      "p95_latency_ms": 15.394028335382854,
+      "per_class": {
+        "NORMAL": {
+          "precision": 0.9531070195627158,
+          "recall": 0.9506456241032999,
+          "f1": 0.9518747306421492,
+          "support": 3485
+        },
+        "REGIONAL_WEATHER_EVENT": {
+          "precision": 0.36627906976744184,
+          "recall": 0.35,
+          "f1": 0.3579545454545454,
+          "support": 180
+        },
+        "SENSOR_SPIKE": {
+          "precision": 0.5196850393700787,
+          "recall": 0.7021276595744681,
+          "f1": 0.5972850678733032,
+          "support": 94
+        },
+        "SENSOR_FREEZE": {
+          "precision": 0.9894736842105263,
+          "recall": 0.9791666666666666,
+          "f1": 0.9842931937172775,
+          "support": 96
+        },
+        "CALIBRATION_DRIFT": {
+          "precision": 0.3394495412844037,
+          "recall": 0.44047619047619047,
+          "f1": 0.383419689119171,
+          "support": 84
+        },
+        "COMMUNICATION_FAILURE": {
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0,
+          "support": 112
+        },
+        "DATA_CORRUPTION": {
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0,
+          "support": 95
+        },
+        "MULTIVARIATE_INCONSISTENCY": {
+          "precision": 1.0,
+          "recall": 0.9772727272727273,
+          "f1": 0.9885057471264368,
+          "support": 88
+        },
+        "SPATIAL_INCONSISTENCY": {
+          "precision": 0.3191489361702128,
+          "recall": 0.1744186046511628,
+          "f1": 0.22556390977443613,
+          "support": 86
+        },
+        "INSUFFICIENT_EVIDENCE": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "support": 0
+        }
+      },
+      "confusion_matrix": [
+        [
+          3313,
+          106,
+          2,
+          1,
+          41,
+          0,
+          0,
+          0,
+          21,
+          1
+        ],
+        [
+          87,
+          63,
+          6,
+          0,
+          20,
+          0,
+          0,
+          0,
+          4,
+          0
+        ],
+        [
+          20,
+          3,
+          66,
+          0,
+          5,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        [
+          0,
+          0,
+          0,
+          94,
+          2,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        [
+          38,
+          0,
+          2,
+          0,
+          37,
+          0,
+          0,
+          0,
+          7,
+          0
+        ],
+        [
+          0,
+          0,
+          0,
+          0,
+          0,
+          112,
+          0,
+          0,
+          0,
+          0
+        ],
+        [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          95,
+          0,
+          0,
+          0
+        ],
+        [
+          0,
+          0,
+          0,
+          0,
+          2,
+          0,
+          0,
+          86,
+          0,
+          0
+        ],
+        [
+          18,
+          0,
+          51,
+          0,
+          2,
+          0,
+          0,
+          0,
+          15,
+          0
+        ],
+        [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ]
+      ],
+      "classes": [
+        "NORMAL",
+        "REGIONAL_WEATHER_EVENT",
+        "SENSOR_SPIKE",
+        "SENSOR_FREEZE",
+        "CALIBRATION_DRIFT",
+        "COMMUNICATION_FAILURE",
+        "DATA_CORRUPTION",
+        "MULTIVARIATE_INCONSISTENCY",
+        "SPATIAL_INCONSISTENCY",
+        "INSUFFICIENT_EVIDENCE"
+      ]
+    },
+    {
+      "seed": 46,
+      "total_observations": 4320,
+      "overall_accuracy": 0.893287037037037,
+      "macro_precision": 0.7143528277351832,
+      "macro_recall": 0.7317060252826663,
+      "macro_f1": 0.7178675287356131,
+      "normal_to_weather_rate": 0.03414634146341464,
+      "weather_to_sensor_rate": 0.19444444444444445,
+      "sensor_to_weather_rate": 0.0030534351145038168,
+      "false_fault_rate_per_1000": 30.013642564802183,
+      "mean_latency_ms": 14.780689004853937,
+      "p95_latency_ms": 15.380341670728136,
+      "per_class": {
+        "NORMAL": {
+          "precision": 0.9530842745438749,
+          "recall": 0.9443328550932568,
+          "f1": 0.9486883828192563,
+          "support": 3485
+        },
+        "REGIONAL_WEATHER_EVENT": {
+          "precision": 0.3314917127071823,
+          "recall": 0.3333333333333333,
+          "f1": 0.33240997229916897,
+          "support": 180
+        },
+        "SENSOR_SPIKE": {
+          "precision": 0.528,
+          "recall": 0.7021276595744681,
+          "f1": 0.6027397260273973,
+          "support": 94
+        },
+        "SENSOR_FREEZE": {
+          "precision": 0.9895833333333334,
+          "recall": 0.9895833333333334,
+          "f1": 0.9895833333333334,
+          "support": 96
+        },
+        "CALIBRATION_DRIFT": {
+          "precision": 0.31451612903225806,
+          "recall": 0.4642857142857143,
+          "f1": 0.375,
+          "support": 84
+        },
+        "COMMUNICATION_FAILURE": {
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0,
+          "support": 112
+        },
+        "DATA_CORRUPTION": {
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0,
+          "support": 95
+        },
+        "MULTIVARIATE_INCONSISTENCY": {
+          "precision": 1.0,
+          "recall": 0.9772727272727273,
+          "f1": 0.9885057471264368,
+          "support": 88
+        },
+        "SPATIAL_INCONSISTENCY": {
+          "precision": 0.3125,
+          "recall": 0.1744186046511628,
+          "f1": 0.22388059701492538,
+          "support": 86
+        }
+      },
+      "confusion_matrix": [
+        [
+          3291,
+          119,
+          2,
+          1,
+          50,
+          0,
+          0,
+          0,
+          22
+        ],
+        [
+          85,
+          60,
+          7,
+          0,
+          24,
+          0,
+          0,
+          0,
+          4
+        ],
+        [
+          21,
+          2,
+          66,
+          0,
+          5,
+          0,
+          0,
+          0,
+          0
+        ],
+        [
+          0,
+          0,
+          0,
+          95,
+          1,
+          0,
+          0,
+          0,
+          0
+        ],
+        [
+          36,
+          0,
+          2,
+          0,
+          39,
+          0,
+          0,
+          0,
+          7
+        ],
+        [
+          0,
+          0,
+          0,
+          0,
+          0,
+          112,
+          0,
+          0,
+          0
+        ],
+        [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          95,
+          0,
+          0
+        ],
+        [
+          0,
+          0,
+          0,
+          0,
+          2,
+          0,
+          0,
+          86,
+          0
+        ],
+        [
+          20,
+          0,
+          48,
+          0,
+          3,
+          0,
+          0,
+          0,
+          15
+        ]
+      ],
+      "classes": [
+        "NORMAL",
+        "REGIONAL_WEATHER_EVENT",
+        "SENSOR_SPIKE",
+        "SENSOR_FREEZE",
+        "CALIBRATION_DRIFT",
+        "COMMUNICATION_FAILURE",
+        "DATA_CORRUPTION",
+        "MULTIVARIATE_INCONSISTENCY",
+        "SPATIAL_INCONSISTENCY"
+      ]
+    }
+  ]
+}

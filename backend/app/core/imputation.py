@@ -51,6 +51,18 @@ class ImputationEngine:
                     nv = getattr(nr, param, None)
                     if nv is None or np.isnan(nv):
                         continue
+
+                    # Filter corrupted/impossible neighbor readings to guarantee imputation safety
+                    try:
+                        f_nv = float(nv)
+                        if param == "temperature" and not (-10.0 <= f_nv <= 60.0):
+                            continue
+                        elif param == "pressure" and not (500.0 <= f_nv <= 1100.0):
+                            continue
+                        elif param == "humidity" and not (0.0 <= f_nv <= 100.0):
+                            continue
+                    except Exception:
+                        continue
                         
                     # Apply elevation correction
                     nst = stations_dict.get(nid)
@@ -91,27 +103,32 @@ class ImputationEngine:
                 estimated = round(0.65 * spatial_idw_val + 0.35 * temp_mean, 2)
                 conf = 0.90 if spatial.valid_neighbor_count >= 3 else 0.82
                 method = f"True Spatial IDW ({spatial.valid_neighbor_count} stations, p=2.0) + Pre-current Temporal Persistence"
+                is_imputed = True
             elif spatial_idw_val is not None:
                 estimated = round(float(spatial_idw_val), 2)
                 conf = 0.85
                 method = f"True Spatial IDW ({spatial.valid_neighbor_count} stations, p=2.0)"
+                is_imputed = True
             elif temp_mean is not None:
                 estimated = round(float(temp_mean), 2)
                 conf = 0.70
                 method = "Local Pre-current Temporal Persistence Baseline"
+                is_imputed = True
             else:
-                fallback_map = {"temperature": 28.0, "pressure": 1010.0, "humidity": 65.0}
-                estimated = fallback_map.get(param, 25.0)
-                conf = 0.40
-                method = "Climatological Envelope Baseline"
+                # Insufficient evidence: strictly avoid fabricating ungrounded numbers
+                estimated = orig_val if orig_val is not None else 0.0
+                conf = 0.0
+                method = "INSUFFICIENT_EVIDENCE: No valid spatial neighbors or pre-current history available"
+                is_imputed = False
 
-            imputed[param] = ImputedValue(
-                parameter=param,
-                original_value=orig_val,
-                estimated_value=estimated,
-                method=method,
-                confidence=round(conf, 2),
-                is_imputed=True
-            )
+            if is_imputed:
+                imputed[param] = ImputedValue(
+                    parameter=param,
+                    original_value=orig_val,
+                    estimated_value=estimated,
+                    method=method,
+                    confidence=round(conf, 2),
+                    is_imputed=is_imputed
+                )
             
         return imputed

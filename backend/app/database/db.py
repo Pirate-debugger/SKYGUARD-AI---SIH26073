@@ -79,6 +79,8 @@ class DatabaseManager:
                 explanation TEXT NOT NULL,
                 recommended_action TEXT NOT NULL,
                 acknowledged INTEGER DEFAULT 0,
+                acknowledged_by TEXT,
+                acknowledged_at TEXT,
                 FOREIGN KEY(station_id) REFERENCES stations(station_id)
             );
             """)
@@ -101,6 +103,8 @@ class DatabaseManager:
                     pass
             for col, col_type in [
                 ("evidence_strength", "TEXT DEFAULT 'MEDIUM'"),
+                ("acknowledged_by", "TEXT"),
+                ("acknowledged_at", "TEXT"),
             ]:
                 try:
                     await db.execute(f"ALTER TABLE alerts ADD COLUMN {col} {col_type};")
@@ -160,26 +164,94 @@ class DatabaseManager:
         async with aiosqlite.connect(self.db_path) as db:
             await db.execute("""
             INSERT OR REPLACE INTO alerts
-            (alert_id, station_id, timestamp, decision, probable_cause, severity, confidence, evidence_strength, flagged_parameters, observed_values, expected_values, deviations, explanation, recommended_action, acknowledged)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            (alert_id, station_id, timestamp, decision, probable_cause, severity, confidence, evidence_strength, flagged_parameters, observed_values, expected_values, deviations, explanation, recommended_action, acknowledged, acknowledged_by, acknowledged_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 alert.alert_id,
                 alert.station_id,
                 alert.timestamp,
-                alert.decision.value,
-                alert.probable_cause.value,
-                alert.severity.value,
+                alert.decision.value if hasattr(alert.decision, "value") else str(alert.decision),
+                alert.probable_cause.value if hasattr(alert.probable_cause, "value") else str(alert.probable_cause),
+                alert.severity.value if hasattr(alert.severity, "value") else str(alert.severity),
                 alert.confidence,
-                alert.evidence_strength.value,
+                alert.evidence_strength.value if hasattr(alert.evidence_strength, "value") else str(alert.evidence_strength),
                 json.dumps(alert.flagged_parameters),
                 json.dumps(alert.observed_values),
                 json.dumps(alert.expected_values),
                 json.dumps(alert.deviations),
                 alert.explanation,
-                alert.recommended_action.value,
-                1 if alert.acknowledged else 0
+                alert.recommended_action.value if hasattr(alert.recommended_action, "value") else str(alert.recommended_action),
+                1 if alert.acknowledged else 0,
+                alert.acknowledged_by,
+                alert.acknowledged_at
             ))
             await db.commit()
+
+    async def acknowledge_alert(
+        self,
+        alert_id: str,
+        operator_name: str = "Operator",
+        acknowledged_by: Optional[str] = None,
+        acknowledged_at: Optional[str] = None
+    ) -> bool:
+        """Persists alert acknowledgement state into the database."""
+        name = acknowledged_by or operator_name
+        if not acknowledged_at:
+            from datetime import datetime, timezone
+            acknowledged_at = datetime.now(timezone.utc).isoformat()
+        async with aiosqlite.connect(self.db_path) as db:
+            cursor = await db.execute("""
+            UPDATE alerts 
+            SET acknowledged = 1, acknowledged_by = ?, acknowledged_at = ?
+            WHERE alert_id = ?
+            """, (name, acknowledged_at, alert_id))
+            await db.commit()
+            return cursor.rowcount > 0
+
+    async def get_alerts(self, limit: int = 50, acknowledged: Optional[bool] = None) -> List[AlertRecord]:
+        """Retrieves persistent alerts from SQLite database."""
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            if acknowledged is not None:
+                ack_int = 1 if acknowledged else 0
+                cursor = await db.execute("""
+                SELECT * FROM alerts WHERE acknowledged = ? ORDER BY timestamp DESC LIMIT ?
+                """, (ack_int, limit))
+            else:
+                cursor = await db.execute("""
+                SELECT * FROM alerts ORDER BY timestamp DESC LIMIT ?
+                """, (limit,))
+            rows = await cursor.fetchall()
+            alerts = []
+            for r in rows:
+                d = dict(r)
+                alerts.append(AlertRecord(
+                    alert_id=d["alert_id"],
+                    station_id=d["station_id"],
+                    timestamp=d["timestamp"],
+                    decision=d["decision"],
+                    probable_cause=d["probable_cause"],
+                    severity=d["severity"],
+                    confidence=d["confidence"],
+                    evidence_strength=d.get("evidence_strength", "MEDIUM"),
+                    flagged_parameters=json.loads(d["flagged_parameters"]) if isinstance(d["flagged_parameters"], str) else d["flagged_parameters"],
+                    observed_values=json.loads(d["observed_values"]) if isinstance(d["observed_values"], str) else d["observed_values"],
+                    expected_values=json.loads(d["expected_values"]) if isinstance(d["expected_values"], str) else d["expected_values"],
+                    deviations=json.loads(d["deviations"]) if isinstance(d["deviations"], str) else d["deviations"],
+                    explanation=d["explanation"],
+                    recommended_action=d["recommended_action"],
+                    acknowledged=bool(d["acknowledged"]),
+                    acknowledged_by=d.get("acknowledged_by"),
+                    acknowledged_at=d.get("acknowledged_at")
+                ))
+            return alerts
+
+    async def get_readings_count(self) -> int:
+        """Returns total historical observations recorded in database."""
+        async with aiosqlite.connect(self.db_path) as db:
+            cursor = await db.execute("SELECT COUNT(*) FROM readings;")
+            row = await cursor.fetchone()
+            return int(row[0]) if row else 0
 
     async def get_station_readings(self, station_id: str, limit: int = 50) -> List[Dict[str, Any]]:
         async with aiosqlite.connect(self.db_path) as db:

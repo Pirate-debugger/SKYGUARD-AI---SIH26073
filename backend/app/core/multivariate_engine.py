@@ -65,20 +65,14 @@ class MultivariateConsistencyEngine:
                 explanation="Partial parameters available; multivariate check deferred"
             )
 
-        # 1. Thermodynamic Law: Dewpoint cannot exceed air temperature
+        # 1. Thermodynamic Consistency: Dewpoint cannot exceed air temperature
         dewpoint = self.calculate_dewpoint(t, rh)
         if dewpoint is not None:
-            if dewpoint > t + 0.5: # 0.5°C margin for sensor calibration tolerance
+            if dewpoint > t + 0.5:  # 0.5°C tolerance for instrument calibration
                 is_consistent = False
                 discordant_params.extend(["temperature", "humidity"])
                 reasons.append(
                     f"Thermodynamic violation: Computed Dewpoint ({dewpoint:.1f}°C) exceeds Air Temperature ({t:.1f}°C)"
-                )
-            elif dewpoint > 35.0: # Global Earth physical ceiling for surface air
-                is_consistent = False
-                discordant_params.extend(["temperature", "humidity"])
-                reasons.append(
-                    f"Atmospheric thermodynamic ceiling breached: Computed Dewpoint ({dewpoint:.1f}°C) exceeds terrestrial limit (35.0°C)"
                 )
 
         # 2. Multivariate Dynamic Coupling check (if previous reading is available)

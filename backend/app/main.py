@@ -69,9 +69,17 @@ async def lifespan(app: FastAPI):
         # Save to DB asynchronously
         for rd in packet.get("readings", []):
             try:
-                pass
-            except Exception:
-                pass
+                processed_obj = ProcessedReading(**rd)
+                await db_manager.save_reading(processed_obj)
+            except Exception as e:
+                print(f"[DB Stream Warning] Failed to persist reading: {e}")
+        
+        for alt in packet.get("alerts", []):
+            try:
+                alert_obj = AlertRecord(**alt)
+                await db_manager.save_alert(alert_obj)
+            except Exception as e:
+                print(f"[DB Stream Warning] Failed to persist alert: {e}")
         
         # Broadcast to active WebSockets
         dead_sockets = []
@@ -378,21 +386,37 @@ async def get_system_diagnostics():
 # --- Alert APIs ---
 @app.get("/api/alerts")
 async def list_alerts(limit: int = 50, acknowledged: Optional[bool] = None):
-    alerts = pipeline.alerts
-    if acknowledged is not None:
-        alerts = [a for a in alerts if a.acknowledged == acknowledged]
-    return [a.model_dump() for a in reversed(alerts[-limit:])]
+    if pipeline.alerts:
+        alerts = pipeline.alerts
+        if acknowledged is not None:
+            alerts = [a for a in alerts if a.acknowledged == acknowledged]
+        return [a.model_dump() for a in reversed(alerts[-limit:])]
+    else:
+        # Fallback to persistent SQLite DB if memory is empty after restart
+        db_alerts = await db_manager.get_alerts(limit=limit, acknowledged=acknowledged)
+        return [a.model_dump() for a in db_alerts]
 
 
 @app.post("/api/alerts/{alert_id}/acknowledge")
 async def acknowledge_alert(alert_id: str, operator_name: str = "Operator"):
+    ack_time = datetime.now(timezone.utc).isoformat()
+    found = False
     for a in pipeline.alerts:
         if a.alert_id == alert_id:
             a.acknowledged = True
             a.acknowledged_by = operator_name
-            a.acknowledged_at = datetime.now(timezone.utc).isoformat()
+            a.acknowledged_at = ack_time
+            found = True
+            break
+            
+    # Persist in SQLite database so acknowledgement survives restart
+    try:
+        await db_manager.acknowledge_alert(alert_id, operator_name, ack_time)
+        return {"status": "SUCCESS", "alert_id": alert_id, "acknowledged": True}
+    except Exception as e:
+        if found:
             return {"status": "SUCCESS", "alert_id": alert_id, "acknowledged": True}
-    raise HTTPException(status_code=404, detail="Alert ID not found")
+        raise HTTPException(status_code=404, detail=f"Alert ID not found: {e}")
 
 
 # --- Simulator Controls ---

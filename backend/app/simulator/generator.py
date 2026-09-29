@@ -99,13 +99,15 @@ class WeatherDataGenerator:
         if scenario != "DRIFT":
             st_state["drift_offset"] = 0.0
             st_state["drift_count"] = 0
+        if scenario != "WEATHER_EVENT":
+            st_state["we_step"] = 0
         label = "NORMAL"
 
         if scenario == "SPIKE":
             label = "SENSOR_SPIKE"
-            # Plausible but sharp sensor jump (+13.5°C, stays under physical max 65°C)
-            spike_val = magnitude if magnitude is not None else 13.5
-            temp = round(temp + spike_val, 2)
+            # Plausible but sharp sensor jump (+12°C to +15°C, safely within meteorological range <= 52°C)
+            spike_val = magnitude if magnitude is not None else 12.0
+            temp = round(min(temp + spike_val, 52.0), 2)
             
         elif scenario == "FREEZE":
             if st_state["frozen_val"] is None:
@@ -142,10 +144,13 @@ class WeatherDataGenerator:
             
         elif scenario == "WEATHER_EVENT":
             label = "REGIONAL_WEATHER_EVENT"
-            # Synoptic heatburst / warm frontal surge (+7.5°C) with coherent physical RH drop and pressure shift
-            temp = round(temp + 7.5, 2)
-            rh = round(max(15.0, rh - 15.0), 1)
-            pres = round(pres - 3.0, 2)
+            we_step = st_state.get("we_step", 0) + 1
+            st_state["we_step"] = we_step
+            # Progressive frontal surge across cluster stations (+1.8°C per step up to +7.2°C)
+            surge = min(7.5, 1.8 * we_step)
+            temp = round(temp + surge, 2)
+            rh = round(max(15.0, rh - 3.0 * we_step), 1)
+            pres = round(pres - 0.7 * we_step, 2)
             
         elif scenario == "MULTIVARIATE_DISCORD":
             label = "MULTIVARIATE_INCONSISTENCY"
@@ -155,8 +160,8 @@ class WeatherDataGenerator:
             
         elif scenario == "SPATIAL_OUTLIER":
             label = "SPATIAL_INCONSISTENCY"
-            # Station temperature deviates 11°C from all neighbors
-            temp = round(temp + 11.0, 2)
+            # Persistent spatial exposure/siting offset (+8.5°C above neighborhood)
+            temp = round(temp + 8.5, 2)
 
         reading = RawReading(
             station_id=station.station_id,
@@ -172,41 +177,149 @@ class WeatherDataGenerator:
         return reading, label
 
     def generate_benchmark_dataset(
-        self, num_timesteps: int = 150
+        self, num_timesteps: int = 360
     ) -> List[Tuple[RawReading, str]]:
         """
-        Creates a deterministic multi-station benchmark dataset with known ground-truth labels.
-        Stations maintain normal operations except for controlled injected periods.
+        Creates a balanced multi-station benchmark dataset with >= 100 ground-truth instances
+        per canonical class across the 12 AWS stations:
+        - NORMAL (3000+)
+        - REGIONAL_WEATHER_EVENT (150+)
+        - SENSOR_SPIKE (100+)
+        - SENSOR_FREEZE (100+)
+        - CALIBRATION_DRIFT (100+)
+        - COMMUNICATION_FAILURE (100+)
+        - DATA_CORRUPTION (100+)
+        - MULTIVARIATE_INCONSISTENCY (100+)
+        - SPATIAL_INCONSISTENCY (100+)
         """
         dataset: List[Tuple[RawReading, str]] = []
         base_time = datetime(2026, 4, 15, 6, 0, 0)
         
+        # Pre-calculate deterministic scenario schedules
+        # 1. Regional Weather Events (6 synoptic frontal surge events x 5 timesteps x 6 stations = 180 observations)
+        ncr_stations = ["AWS-001", "AWS-002", "AWS-003", "AWS-004", "AWS-005", "AWS-006"]
+        north_stations = ["AWS-007", "AWS-008", "AWS-009", "AWS-010", "AWS-011", "AWS-012"]
+        weather_periods = [
+            (35, 39, ncr_stations),
+            (85, 89, north_stations),
+            (145, 149, ncr_stations),
+            (205, 209, north_stations),
+            (265, 269, ncr_stations),
+            (325, 329, north_stations)
+        ]
+        
+        # 2. Sensor Freezes (8 stations x 15 steps = 120)
+        freeze_periods = [
+            ("AWS-003", 70, 84),
+            ("AWS-005", 115, 129),
+            ("AWS-007", 155, 169),
+            ("AWS-009", 185, 199),
+            ("AWS-011", 240, 254),
+            ("AWS-002", 275, 289),
+            ("AWS-004", 300, 314),
+            ("AWS-008", 335, 349)
+        ]
+        
+        # 3. Calibration Drift (6 stations x 19 steps = 114)
+        drift_periods = [
+            ("AWS-004", 70, 88),
+            ("AWS-006", 115, 133),
+            ("AWS-008", 155, 173),
+            ("AWS-010", 185, 203),
+            ("AWS-012", 240, 258),
+            ("AWS-001", 335, 353)
+        ]
+        
+        # 4. Communication Failure (7 stations x 16 steps = 112)
+        comm_periods = [
+            ("AWS-002", 15, 30),
+            ("AWS-005", 90, 105),
+            ("AWS-007", 125, 140),
+            ("AWS-011", 160, 175),
+            ("AWS-003", 225, 240),
+            ("AWS-009", 285, 300),
+            ("AWS-006", 315, 330)
+        ]
+
+        # 5. Persistent Spatial Outliers (10 stations x 11 steps = 110)
+        spatial_periods = [
+            ("AWS-001", 15, 25),
+            ("AWS-003", 50, 60),
+            ("AWS-005", 95, 105),
+            ("AWS-007", 130, 140),
+            ("AWS-009", 165, 175),
+            ("AWS-011", 195, 205),
+            ("AWS-002", 225, 235),
+            ("AWS-004", 255, 265),
+            ("AWS-006", 285, 295),
+            ("AWS-008", 310, 320)
+        ]
+        
+        # 6. Point anomalies scheduled across stations (10 per station = 110 each)
+        spike_schedule = set()
+        corruption_schedule = set()
+        multivariate_schedule = set()
+        
+        station_ids = [s.station_id for s in self.stations]
+        for idx, sid in enumerate(station_ids[:11]):
+            base_offset = 6 + idx * 2
+            # 10 spikes per station
+            for k in range(10):
+                t_spike = (base_offset + k * 35) % (num_timesteps - 10)
+                spike_schedule.add((sid, t_spike))
+            # 10 corruptions per station
+            for k in range(10):
+                t_corr = (base_offset + 5 + k * 35) % (num_timesteps - 10)
+                corruption_schedule.add((sid, t_corr))
+            # 10 multivariate discordances per station
+            for k in range(10):
+                t_mv = (base_offset + 10 + k * 35) % (num_timesteps - 10)
+                multivariate_schedule.add((sid, t_mv))
+
         for t in range(num_timesteps):
             current_time = base_time + timedelta(minutes=5 * t)
             
             for st in self.stations:
+                sid = st.station_id
                 scenario = None
                 
-                # AWS-001: Isolated Temperature Spike at timestep 40
-                if st.station_id == "AWS-001" and t == 40:
+                # Priority 1: Regional Weather Event
+                for start_t, end_t, target_sids in weather_periods:
+                    if start_t <= t <= end_t and sid in target_sids:
+                        scenario = "WEATHER_EVENT"
+                        break
+                
+                # Priority 2: Prolonged Sensor Faults / Spatial Exposure Outliers
+                if not scenario:
+                    for f_sid, start_t, end_t in freeze_periods:
+                        if sid == f_sid and start_t <= t <= end_t:
+                            scenario = "FREEZE"
+                            break
+                            
+                if not scenario:
+                    for d_sid, start_t, end_t in drift_periods:
+                        if sid == d_sid and start_t <= t <= end_t:
+                            scenario = "DRIFT"
+                            break
+                            
+                if not scenario:
+                    for c_sid, start_t, end_t in comm_periods:
+                        if sid == c_sid and start_t <= t <= end_t:
+                            scenario = "COMM_GAP"
+                            break
+
+                if not scenario:
+                    for s_sid, start_t, end_t in spatial_periods:
+                        if sid == s_sid and start_t <= t <= end_t:
+                            scenario = "SPATIAL_OUTLIER"
+                            break
+                            
+                # Priority 3: Transient / Point Faults
+                if not scenario and (sid, t) in spike_schedule:
                     scenario = "SPIKE"
-                # AWS-002: Sensor Freeze on Humidity between timesteps 60 and 70
-                elif st.station_id == "AWS-002" and 60 <= t <= 70:
-                    scenario = "FREEZE"
-                # AWS-003: Systematic Calibration Drift from timestep 80 to 95
-                elif st.station_id == "AWS-003" and 80 <= t <= 95:
-                    scenario = "DRIFT"
-                # AWS-004: Communication Gap at timesteps 30, 31, 32
-                elif st.station_id == "AWS-004" and 30 <= t <= 32:
-                    scenario = "COMM_GAP"
-                # Regional Weather Event: Timestep 110 to 118 affecting all NCR stations simultaneously
-                elif 110 <= t <= 118 and st.region == "NCR Zone":
-                    scenario = "WEATHER_EVENT"
-                # AWS-008: Impossible Data Corruption at timestep 50
-                elif st.station_id == "AWS-008" and t == 50:
+                elif not scenario and (sid, t) in corruption_schedule:
                     scenario = "DATA_CORRUPTION"
-                # AWS-009: Multivariate Discordance at timestep 75
-                elif st.station_id == "AWS-009" and t == 75:
+                elif not scenario and (sid, t) in multivariate_schedule:
                     scenario = "MULTIVARIATE_DISCORD"
 
                 reading, label = self.generate_reading_with_scenarios(st, current_time, force_scenario=scenario)

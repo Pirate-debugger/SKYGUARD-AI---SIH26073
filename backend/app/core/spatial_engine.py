@@ -139,6 +139,15 @@ class SpatialConsistencyEngine:
         target_st = self.stations.get(target_id)
         target_elev = target_st.elevation_m if target_st else 200.0
 
+        # Parse target timestamp for freshness check
+        try:
+            from datetime import datetime
+            t_target = datetime.fromisoformat(reading.timestamp.replace("Z", "+00:00"))
+        except Exception:
+            t_target = None
+            
+        stale_neighbors: List[str] = []
+
         for param in params:
             target_val = getattr(reading, param, None)
             if target_val is None or np.isnan(target_val):
@@ -156,6 +165,19 @@ class SpatialConsistencyEngine:
                 # Use current synchronized snapshot if available, otherwise latest_readings
                 nr = snapshot.get(nid) if snapshot and (nid in snapshot) else self.latest_readings.get(nid)
                 if nr:
+                    # Check neighbor observation freshness
+                    if t_target and nr.timestamp:
+                        try:
+                            from datetime import datetime
+                            t_n = datetime.fromisoformat(nr.timestamp.replace("Z", "+00:00"))
+                            age_sec = abs((t_target - t_n).total_seconds())
+                            if age_sec > 900.0:  # Beyond 15-minute tolerance
+                                if nid not in stale_neighbors:
+                                    stale_neighbors.append(nid)
+                                continue
+                        except Exception:
+                            pass
+
                     nv = getattr(nr, param, None)
                     if nv is not None and not np.isnan(nv):
                         nst = self.stations.get(nid)
@@ -293,6 +315,7 @@ class SpatialConsistencyEngine:
             neighbor_count=len(neighbor_ids),
             valid_neighbor_count=valid_n_count,
             neighbor_station_ids=neighbor_ids,
+            stale_neighbor_ids=stale_neighbors,
             neighbor_medians=medians,
             neighbor_mads=mads,
             relative_deviations=rel_deviations,

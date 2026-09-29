@@ -24,6 +24,41 @@ async def seed_initial_data(pipeline: SkyGuardPipeline, db: DatabaseManager):
         pipeline.spatial_engine.register_station(st)
         await db.save_station(st)
 
+    count = await db.get_readings_count()
+    if count > 0:
+        print(f"[Seed] Found {count} existing historical readings in database. Restoring operational state...")
+        # Restore existing alerts
+        existing_alerts = await db.get_alerts(limit=100)
+        pipeline.alerts = list(reversed(existing_alerts))
+        
+        # Restore recent readings per station to rebuild temporal context and health state
+        for st in DEFAULT_STATIONS:
+            recent_readings = await db.get_station_readings(st.station_id, limit=30)
+            for r_dict in recent_readings:
+                from app.models.schemas import RawReading, DecisionClassification, ProbableCause
+                raw = RawReading(
+                    station_id=st.station_id,
+                    timestamp=r_dict["timestamp"],
+                    temperature=r_dict.get("temperature"),
+                    pressure=r_dict.get("pressure"),
+                    humidity=r_dict.get("humidity"),
+                    latitude=st.latitude,
+                    longitude=st.longitude,
+                    elevation_m=st.elevation_m,
+                    station_type=st.station_type,
+                    region=st.region
+                )
+                pipeline.temporal_engine.commit_reading(raw)
+                pipeline.spatial_engine.update_latest_reading(raw)
+                pipeline.health_engine.update_and_get_health(
+                    st.station_id,
+                    DecisionClassification(r_dict["decision"]),
+                    ProbableCause(r_dict["probable_cause"]),
+                    r_dict["timestamp"]
+                )
+        print(f"[Seed] Restart recovery complete. Restored {len(pipeline.alerts)} alerts and active temporal context.")
+        return
+
     generator = WeatherDataGenerator(stations=DEFAULT_STATIONS)
     base_time = datetime(2026, 9, 28, 10, 0, 0)
     

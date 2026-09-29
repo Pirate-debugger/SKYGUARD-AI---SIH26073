@@ -147,6 +147,11 @@ class MLAnomalyDetector:
                 # Percentage of total standardized deviation
                 contributions[name] = round(float(dev / total_dev), 3)
                 
+        # Calibrated normalized anomaly index [0.0..1.0]
+        # raw_score > 0 is inlier/normal; raw_score < 0 is outlier/anomalous
+        # Linear calibration around boundary: 0.0 -> 0.50, +0.25 -> 0.0, -0.25 -> 1.0
+        normalized_score = float(np.clip(0.5 - 2.0 * raw_score, 0.0, 1.0))
+
         # Confidence score: maps raw decision function (-0.35 to +0.25) to [0.5, 0.99]
         if is_anomaly:
             # The more negative, the more anomalous and higher the confidence
@@ -157,7 +162,9 @@ class MLAnomalyDetector:
 
         return MLEvidence(
             is_anomaly=is_anomaly,
-            anomaly_score=round(raw_score, 4),
+            raw_decision_score=round(raw_score, 4),
+            normalized_anomaly_score=round(normalized_score, 4),
+            anomaly_score=round(normalized_score, 4),
             confidence=round(conf, 3),
             feature_contributions=contributions,
             model_name=self.model_name

@@ -114,7 +114,7 @@ class AnomalyFusionEngine:
             abs(spatial.relative_deviations.get("humidity", 0.0)) >= 10.0 or
             spatial.neighbor_count == 0
         )
-        if temporal.drift_detected and has_spatial_divergence:
+        if temporal.drift_detected and has_spatial_divergence and not spatial.regional_event_detected and spatial.agreement_ratio < 0.50:
             conf = 0.90
             severity = SeverityLevel.MEDIUM
             explanation = (
@@ -182,7 +182,17 @@ class AnomalyFusionEngine:
             )
             return DecisionClassification.SENSOR_ANOMALY, severity, conf, EvidenceStrength.HIGH, explanation
 
-        # CASE D: Insufficient Evidence Check
+        # CASE D: Isolated Spatial Outlier (Station deviates from consistent neighborhood)
+        if spatial_outlier and not spatial.regional_event_detected and spatial.valid_neighbor_count >= 2:
+            conf = 0.88
+            severity = SeverityLevel.MEDIUM
+            explanation = (
+                f"Isolated Spatial Outlier: Observation diverges from neighboring stations ({spatial.explanation}) "
+                f"while neighborhood remains internally consistent. Station microclimate, bad exposure, or sensor calibration bias suspected."
+            )
+            return DecisionClassification.SENSOR_ANOMALY, severity, conf, EvidenceStrength.MEDIUM, explanation
+
+        # CASE E: Insufficient Evidence Check
         if history_len < 3 and spatial.valid_neighbor_count == 0:
             if temporal_alert or ml_anomaly:
                 conf = 0.45

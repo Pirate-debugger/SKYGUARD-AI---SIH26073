@@ -110,11 +110,11 @@ export const LiveStreamControls: React.FC<LiveStreamControlsProps> = ({
             className="btn btn-danger"
             style={{ fontSize: '11px', padding: '6px 10px' }}
             disabled={isSubmitting}
-            onClick={() => handleInject('SPIKE', 'temperature', 1, 58.0)}
-            title="Inject rapid +58°C jump in temperature (Isolated Sensor Spike)"
+            onClick={() => handleInject('SPIKE', 'temperature', 1, 12.0)}
+            title="Inject realistic +12°C jump in temperature (Isolated Sensor Spike)"
           >
             <Zap style={{ width: '13px', height: '13px' }} />
-            Temp Spike (+58°C)
+            Temp Spike (+12°C)
           </button>
 
           {/* Regional Weather Event */}

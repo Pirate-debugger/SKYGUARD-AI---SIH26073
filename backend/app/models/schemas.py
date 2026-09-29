@@ -146,6 +146,7 @@ class SpatialEvidence(BaseModel):
     neighbor_count: int = 0
     valid_neighbor_count: int = 0
     neighbor_station_ids: List[str] = []
+    stale_neighbor_ids: List[str] = []
     neighbor_medians: Dict[str, float] = {}
     neighbor_mads: Dict[str, float] = {}
     relative_deviations: Dict[str, float] = {}
@@ -158,7 +159,9 @@ class SpatialEvidence(BaseModel):
 
 class MLEvidence(BaseModel):
     is_anomaly: bool = False
-    anomaly_score: float = 0.0  # Normalized anomaly index (0..1, higher = more unusual)
+    raw_decision_score: float = 0.0  # Raw scikit-learn decision_function output (positive = inlier, negative = outlier)
+    normalized_anomaly_score: float = 0.0  # Calibrated anomaly index [0.0..1.0] (0 = normal, 1 = extreme anomaly)
+    anomaly_score: float = 0.0  # Alias to normalized_anomaly_score for consistent API compatibility
     confidence: float = 0.0
     feature_contributions: Dict[str, float] = {}  # Standardized feature contribution (distance-based attribution)
     model_name: str = "IsolationForest-v2.0.0"

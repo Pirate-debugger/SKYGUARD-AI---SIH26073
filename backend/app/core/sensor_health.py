@@ -99,26 +99,6 @@ class StationHealthTracker:
         else:
             comm_state = CommunicationState.ONLINE
 
-        # Insufficient history check
-        if self.total_readings_processed < 6:
-            return SensorHealthSummary(
-                station_id=self.station_id,
-                status=SensorHealthStatus.HEALTHY,
-                communication_state=comm_state,
-                health_score=95.0,
-                degradation_signal=DegradationLevel.LOW,
-                health_trend="STABLE",
-                recent_spikes_count=0,
-                recent_frozen_intervals=0,
-                recent_comm_gaps=0,
-                missed_intervals=missed_intervals,
-                time_since_last_reading_min=round(time_since_last_min, 1),
-                drift_trend_detected=False,
-                maintenance_recommendation=MaintenanceRecommendation.NO_ACTION,
-                summary_text="Insufficient history for degradation prediction; establishing baseline.",
-                last_updated=now_iso
-            )
-
         # Count occurrences in recent operational window
         spikes = sum(1 for e in self.recent_events if e["probable_cause"] == ProbableCause.SENSOR_SPIKE)
         freezes = sum(1 for e in self.recent_events if e["probable_cause"] == ProbableCause.SENSOR_FREEZE)
@@ -126,7 +106,7 @@ class StationHealthTracker:
         comm_errors = sum(1 for e in self.recent_events if e["decision"] == DecisionClassification.COMMUNICATION_ERROR)
         anomalies = sum(1 for e in self.recent_events if e["decision"] == DecisionClassification.SENSOR_ANOMALY)
         
-        # Calculate health trend: compare recent 10 events vs earlier window
+        # Calculate health trend: compare recent 8 events vs earlier window
         events_list = list(self.recent_events)
         if len(events_list) >= 15:
             recent_sub = events_list[-8:]
@@ -158,11 +138,14 @@ class StationHealthTracker:
         else:
             deg_signal = DegradationLevel.HIGH
 
-        # Maintenance Recommendation
+        # Maintenance Recommendation & Status
         if score >= 90.0:
             status = SensorHealthStatus.HEALTHY
             rec = MaintenanceRecommendation.NO_ACTION
-            summary = "Station operating within standard meteorological specifications."
+            if self.total_readings_processed < 6:
+                summary = "Establishing baseline; station operating within standard meteorological specifications."
+            else:
+                summary = "Station operating within standard meteorological specifications."
         elif score >= 75.0:
             status = SensorHealthStatus.WATCH
             rec = MaintenanceRecommendation.CONTINUE_MONITORING
@@ -211,6 +194,10 @@ class SensorHealthEngine:
             self.trackers[station_id] = StationHealthTracker(station_id)
         return self.trackers[station_id]
 
+    def get_health_summary(self, station_id: str, current_time: Optional[datetime] = None) -> SensorHealthSummary:
+        tracker = self.get_or_create_tracker(station_id)
+        return tracker.evaluate_health(current_time)
+
     def update_and_get_health(
         self,
         station_id: str,
@@ -221,6 +208,37 @@ class SensorHealthEngine:
         tracker = self.get_or_create_tracker(station_id)
         tracker.record_reading_event(decision, probable_cause, ts)
         return tracker.evaluate_health()
+
+    def update_from_reading(
+        self,
+        station_id: str,
+        is_spike: bool = False,
+        is_frozen: bool = False,
+        is_comm_gap: bool = False,
+        is_drift: bool = False,
+        is_weather_event: bool = False,
+        timestamp: Optional[str] = None
+    ) -> SensorHealthSummary:
+        ts = timestamp or datetime.now(timezone.utc).isoformat()
+        if is_weather_event:
+            decision = DecisionClassification.WEATHER_EVENT
+            cause = ProbableCause.REGIONAL_WEATHER_EVENT
+        elif is_spike:
+            decision = DecisionClassification.SENSOR_ANOMALY
+            cause = ProbableCause.SENSOR_SPIKE
+        elif is_frozen:
+            decision = DecisionClassification.SENSOR_ANOMALY
+            cause = ProbableCause.SENSOR_FREEZE
+        elif is_drift:
+            decision = DecisionClassification.SENSOR_DEGRADATION
+            cause = ProbableCause.CALIBRATION_DRIFT
+        elif is_comm_gap:
+            decision = DecisionClassification.COMMUNICATION_ERROR
+            cause = ProbableCause.COMMUNICATION_FAILURE
+        else:
+            decision = DecisionClassification.NORMAL
+            cause = ProbableCause.NORMAL_OPERATION
+        return self.update_and_get_health(station_id, decision, cause, ts)
 
     def get_all_health_summaries(self, current_time: Optional[datetime] = None) -> Dict[str, SensorHealthSummary]:
         return {st_id: tracker.evaluate_health(current_time) for st_id, tracker in self.trackers.items()}

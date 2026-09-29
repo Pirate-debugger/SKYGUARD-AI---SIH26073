@@ -285,57 +285,130 @@ export const StationDetailModal: React.FC<StationDetailModalProps> = ({
             </div>
           </div>
 
-          {/* Nearby Station Spatial Neighborhood Comparison */}
+          {/* Nearby Station Spatial Neighborhood Comparison & Evidence */}
           <div className="glass-panel" style={{ padding: '16px' }}>
-            <h3 style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text-muted)', marginBottom: '12px' }}>
-              SPATIAL NEIGHBORHOOD CROSS-VALIDATION
-            </h3>
-
-            <div style={{ overflowX: 'auto' }}>
-              <table style={{ width: '100%', fontSize: '11px', borderCollapse: 'collapse' }}>
-                <thead>
-                  <tr style={{ color: 'var(--text-dim)', borderBottom: '1px solid var(--border-subtle)', textAlign: 'left' }}>
-                    <th style={{ padding: '6px 8px' }}>NEIGHBOR STATION</th>
-                    <th style={{ padding: '6px 8px' }}>DISTANCE</th>
-                    <th style={{ padding: '6px 8px' }}>MEDIAN TEMP</th>
-                    <th style={{ padding: '6px 8px' }}>RELATIVE DEV</th>
-                    <th style={{ padding: '6px 8px' }}>SPATIAL CONSENSUS</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {neighbors.map((nb) => {
-                    const dev = r?.spatial_evidence?.relative_deviations?.temperature;
-                    return (
-                      <tr key={nb.station_id} style={{ borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
-                        <td className="mono" style={{ padding: '8px', fontWeight: 600, color: '#fff' }}>
-                          {nb.station_id}
-                        </td>
-                        <td style={{ padding: '8px' }} className="mono">
-                          {nb.distance_km} km
-                        </td>
-                        <td style={{ padding: '8px' }} className="mono">
-                          {r?.spatial_evidence?.neighbor_medians?.temperature?.toFixed(1) ?? 'N/A'}°C
-                        </td>
-                        <td style={{ padding: '8px' }} className="mono">
-                          {dev !== undefined ? `${dev > 0 ? '+' : ''}${dev.toFixed(1)}°C` : 'N/A'}
-                        </td>
-                        <td style={{ padding: '8px' }}>
-                          {r?.spatial_evidence?.is_consistent ? (
-                            <span style={{ color: 'var(--status-healthy)', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
-                              <CheckCircle style={{ width: '12px', height: '12px' }} /> Consistent
-                            </span>
-                          ) : (
-                            <span style={{ color: 'var(--status-critical)', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
-                              <AlertTriangle style={{ width: '12px', height: '12px' }} /> Isolated Outlier
-                            </span>
-                          )}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px', flexWrap: 'wrap', gap: '8px' }}>
+              <h3 style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text-muted)' }}>
+                SPATIAL NEIGHBORHOOD CROSS-VALIDATION
+              </h3>
+              <span className="badge" style={{ background: 'rgba(56, 189, 248, 0.1)', color: 'var(--accent-cyan)', fontSize: '11px' }}>
+                150 km Analysis Radius
+              </span>
             </div>
+
+            {/* Spatial Evidence Summary Grid */}
+            <div style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))',
+              gap: '8px',
+              padding: '10px',
+              background: 'rgba(0, 0, 0, 0.25)',
+              borderRadius: '8px',
+              border: '1px solid var(--border-subtle)',
+              marginBottom: '14px',
+              fontSize: '11px'
+            }} className="mono">
+              <div>
+                <span style={{ color: 'var(--text-dim)', display: 'block', fontSize: '10px' }}>NEIGHBORS</span>
+                <span style={{ fontWeight: 700, color: '#fff' }}>{r?.spatial_evidence?.neighbor_count ?? neighbors.length}</span>
+              </div>
+              <div>
+                <span style={{ color: 'var(--text-dim)', display: 'block', fontSize: '10px' }}>VALID NEIGHBORS</span>
+                <span style={{ fontWeight: 700, color: '#fff' }}>{r?.spatial_evidence?.valid_neighbor_count ?? neighbors.length}</span>
+              </div>
+              <div>
+                <span style={{ color: 'var(--text-dim)', display: 'block', fontSize: '10px' }}>CORROBORATION</span>
+                <span style={{ fontWeight: 700, color: (r?.spatial_evidence?.corroborating_stations_count || 0) > 0 ? '#c084fc' : '#fff' }}>
+                  {r?.spatial_evidence?.corroborating_stations_count ?? 0} / {r?.spatial_evidence?.valid_neighbor_count ?? neighbors.length}
+                </span>
+              </div>
+              <div>
+                <span style={{ color: 'var(--text-dim)', display: 'block', fontSize: '10px' }}>AGREEMENT RATIO</span>
+                <span style={{ fontWeight: 700, color: '#fff' }}>
+                  {(r?.spatial_evidence?.agreement_ratio ?? 0.0).toFixed(2)}
+                </span>
+              </div>
+              <div>
+                <span style={{ color: 'var(--text-dim)', display: 'block', fontSize: '10px' }}>DIRECTIONAL</span>
+                <span style={{ fontWeight: 700, color: r?.spatial_evidence?.directional_agreement ? '#c084fc' : '#94a3b8' }}>
+                  {r?.spatial_evidence?.directional_agreement ? 'YES' : 'NO'}
+                </span>
+              </div>
+              <div>
+                <span style={{ color: 'var(--text-dim)', display: 'block', fontSize: '10px' }}>REGIONAL EVENT</span>
+                <span style={{ fontWeight: 700, color: r?.spatial_evidence?.regional_event_detected ? '#c084fc' : '#94a3b8' }}>
+                  {r?.spatial_evidence?.regional_event_detected ? 'CONFIRMED' : 'NO'}
+                </span>
+              </div>
+            </div>
+
+            {neighbors.length === 0 ? (
+              <div style={{
+                padding: '16px',
+                borderRadius: '8px',
+                background: 'rgba(245, 158, 11, 0.06)',
+                border: '1px solid rgba(245, 158, 11, 0.25)',
+                color: '#f59e0b'
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontWeight: 700, fontSize: '12px' }}>
+                  <AlertTriangle style={{ width: '16px', height: '16px' }} />
+                  NO VALID NEIGHBORS WITHIN 150 KM RADIUS
+                </div>
+                <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '6px', lineHeight: 1.5 }}>
+                  <strong>SPATIAL ANALYSIS: INSUFFICIENT SPATIAL EVIDENCE</strong>
+                  <br />
+                  This station is geographically isolated (&gt;150 km from closest operational AWS).
+                  No artificial edges are drawn. Observations cannot be spatially corroborated;
+                  quality control relies deterministically on temporal persistence, data quality limits, and multivariate thermodynamic coupling.
+                </div>
+              </div>
+            ) : (
+              <div style={{ overflowX: 'auto' }}>
+                <table style={{ width: '100%', fontSize: '11px', borderCollapse: 'collapse' }}>
+                  <thead>
+                    <tr style={{ color: 'var(--text-dim)', borderBottom: '1px solid var(--border-subtle)', textAlign: 'left' }}>
+                      <th style={{ padding: '6px 8px' }}>NEIGHBOR STATION</th>
+                      <th style={{ padding: '6px 8px' }}>DISTANCE</th>
+                      <th style={{ padding: '6px 8px' }}>MEDIAN TEMP</th>
+                      <th style={{ padding: '6px 8px' }}>RELATIVE DEV</th>
+                      <th style={{ padding: '6px 8px' }}>SPATIAL CONSENSUS</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {neighbors.map((nb) => {
+                      const dev = r?.spatial_evidence?.relative_deviations?.temperature;
+                      return (
+                        <tr key={nb.station_id} style={{ borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
+                          <td className="mono" style={{ padding: '8px', fontWeight: 600, color: '#fff' }}>
+                            {nb.station_id}
+                          </td>
+                          <td style={{ padding: '8px' }} className="mono">
+                            {nb.distance_km} km
+                          </td>
+                          <td style={{ padding: '8px' }} className="mono">
+                            {r?.spatial_evidence?.neighbor_medians?.temperature?.toFixed(1) ?? 'N/A'}°C
+                          </td>
+                          <td style={{ padding: '8px' }} className="mono">
+                            {dev !== undefined ? `${dev > 0 ? '+' : ''}${dev.toFixed(1)}°C` : 'N/A'}
+                          </td>
+                          <td style={{ padding: '8px' }}>
+                            {r?.spatial_evidence?.is_consistent ? (
+                              <span style={{ color: 'var(--status-healthy)', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                                <CheckCircle style={{ width: '12px', height: '12px' }} /> Consistent
+                              </span>
+                            ) : (
+                              <span style={{ color: 'var(--status-critical)', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                                <AlertTriangle style={{ width: '12px', height: '12px' }} /> Isolated Outlier
+                              </span>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
 
           {/* Optional Imputed / Corrected Values */}

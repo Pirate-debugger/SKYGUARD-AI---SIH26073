@@ -296,3 +296,64 @@ h1, h2, h3, h4, h5, h6 {
   from { opacity: 0; transform: scale(0.96) translateY(8px); }
   to { opacity: 1; transform: scale(1) translateY(0); }
 }
+
+/* Geospatial Mesh Animations */
+@keyframes alert-pulse {
+  0% {
+    r: 11;
+    opacity: 0.9;
+    stroke-width: 2.5;
+  }
+  50% {
+    r: 18;
+    opacity: 0.4;
+    stroke-width: 1.5;
+  }
+  100% {
+    r: 22;
+    opacity: 0;
+    stroke-width: 1;
+  }
+}
+
+.alert-pulse {
+  animation: alert-pulse 1.8s infinite ease-out;
+  transform-origin: center;
+}
+
+@keyframes weather-pulse {
+  0% {
+    r: 12;
+    opacity: 0.85;
+    stroke-width: 2.5;
+  }
+  50% {
+    r: 17;
+    opacity: 0.35;
+    stroke-width: 1.5;
+  }
+  100% {
+    r: 21;
+    opacity: 0;
+    stroke-width: 1;
+  }
+}
+
+.event-ring-weather {
+  animation: weather-pulse 2.2s infinite ease-out;
+  transform-origin: center;
+}
+
+@keyframes edge-flow {
+  from {
+    stroke-dashoffset: 24;
+  }
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+.edge-corroborating {
+  stroke-dasharray: 6 3;
+  animation: edge-flow 1.5s linear infinite;
+}

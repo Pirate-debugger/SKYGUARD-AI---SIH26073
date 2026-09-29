@@ -12,7 +12,7 @@ Controls real-time continuous AWS telemetry streaming:
 import asyncio
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Callable, Any
-from app.models.schemas import StationMetadata, RawReading, ProcessedReading, AlertRecord, StreamInjectionPayload
+from app.models.schemas import StationMetadata, RawReading, ProcessedReading, AlertRecord, StreamInjectionPayload, SensorHealthStatus
 from app.simulator.generator import WeatherDataGenerator, DEFAULT_STATIONS
 from app.core.pipeline import SkyGuardPipeline
 
@@ -150,6 +150,50 @@ class StreamSimulatorManager:
         step_readings = [p.model_dump() for p, _ in batch_results]
         step_alerts = [a.model_dump() for _, a in batch_results if a]
 
+        # Real-time health summaries across all stations
+        health_dict = self.pipeline.health_engine.get_all_health_summaries()
+        health_summaries = {
+            sid: h.model_dump() for sid, h in health_dict.items()
+        }
+
+        # Calculate network overview in lockstep with the tick
+        healthy = 0
+        watch = 0
+        degraded = 0
+        critical = 0
+        offline = 0
+        for st in self.stations:
+            h = health_dict.get(st.station_id)
+            if not h:
+                healthy += 1
+                continue
+            if h.status == SensorHealthStatus.HEALTHY:
+                healthy += 1
+            elif h.status == SensorHealthStatus.WATCH:
+                watch += 1
+            elif h.status == SensorHealthStatus.DEGRADED:
+                degraded += 1
+            elif h.status == SensorHealthStatus.CRITICAL:
+                critical += 1
+            elif h.status == SensorHealthStatus.OFFLINE:
+                offline += 1
+
+        active_anomalies = sum(1 for a in self.pipeline.alerts if not a.acknowledged and a.decision == "SENSOR_ANOMALY")
+        weather_events = sum(1 for a in self.pipeline.alerts if a.decision == "WEATHER_EVENT")
+
+        network_overview = {
+            "total_stations": len(self.stations),
+            "healthy_count": healthy,
+            "watch_count": watch,
+            "degraded_count": degraded,
+            "critical_count": critical,
+            "offline_count": offline,
+            "active_anomalies_count": active_anomalies,
+            "alerts_today_count": len(self.pipeline.alerts),
+            "weather_events_count": weather_events,
+            "system_status": "OPERATIONAL"
+        }
+
         # Broadcast update to web clients
         packet = {
             "type": "STREAM_TICK",
@@ -157,6 +201,8 @@ class StreamSimulatorManager:
             "sim_time": self.current_sim_time.isoformat(),
             "readings": step_readings,
             "alerts": step_alerts,
+            "health_summaries": health_summaries,
+            "network_overview": network_overview,
             "active_injections": list(self.active_injections.keys())
         }
         await self.broadcast(packet)

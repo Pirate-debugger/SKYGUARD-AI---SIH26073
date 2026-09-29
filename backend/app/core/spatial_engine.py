@@ -57,7 +57,10 @@ class SpatialConsistencyEngine:
             self.latest_readings[st_id] = r
 
     def find_nearest_neighbors(
-        self, target_station_id: str, k: int = SPATIAL_CONFIG["k_nearest_neighbors"]
+        self,
+        target_station_id: str,
+        k: int = SPATIAL_CONFIG["k_nearest_neighbors"],
+        max_distance_km: float = SPATIAL_CONFIG["max_distance_km"]
     ) -> List[Tuple[str, float]]:
         """Finds k nearest neighboring stations with their distances in km."""
         if target_station_id not in self.stations:
@@ -70,11 +73,102 @@ class SpatialConsistencyEngine:
             if st_id == target_station_id:
                 continue
             dist = haversine_km(target.latitude, target.longitude, st.latitude, st.longitude)
-            if dist <= SPATIAL_CONFIG["max_distance_km"]:
+            if dist <= max_distance_km:
                 distances.append((st_id, dist))
                 
         distances.sort(key=lambda x: x[1])
         return distances[:k]
+
+    def get_network_topology(
+        self,
+        radius_km: Optional[float] = None,
+        k: Optional[int] = None
+    ) -> Dict[str, Any]:
+        """
+        Returns authoritative geospatial mesh topology:
+        - Exact Haversine distances
+        - Only connects stations strictly within radius_km
+        - Respects k_nearest_neighbors
+        - Discovers zero-neighbor stations and highlights active event corroborations
+        """
+        max_dist = radius_km if radius_km is not None else SPATIAL_CONFIG["max_distance_km"]
+        k_val = k if k is not None else SPATIAL_CONFIG["k_nearest_neighbors"]
+        
+        station_topologies = []
+        edges_set = set()
+        edges = []
+        
+        for sid, st in self.stations.items():
+            # Find all neighbors within radius
+            all_in_radius = []
+            for other_id, other_st in self.stations.items():
+                if sid == other_id:
+                    continue
+                d = haversine_km(st.latitude, st.longitude, other_st.latitude, other_st.longitude)
+                if d <= max_dist:
+                    all_in_radius.append((other_id, d))
+                    
+            all_in_radius.sort(key=lambda x: x[1])
+            selected_neighbors = all_in_radius[:k_val]
+            
+            # Check if station has an active regional weather event or corroboration
+            active_events = [ev for (s_id, _), ev in self.active_regional_events.items() if s_id == sid]
+            is_event = len(active_events) > 0
+            
+            neighbor_objs = []
+            for nid, dist in selected_neighbors:
+                neighbor_objs.append({
+                    "station_id": nid,
+                    "distance_km": round(dist, 1)
+                })
+                # Add unique undirected edge
+                edge_key = tuple(sorted([sid, nid]))
+                if edge_key not in edges_set:
+                    edges_set.add(edge_key)
+                    # Edge is corroborating if both stations have active regional events or corroboration
+                    nid_active = any(s_id == nid for (s_id, _) in self.active_regional_events.keys())
+                    is_corroborating = is_event and nid_active
+                    edges.append({
+                        "source": edge_key[0],
+                        "target": edge_key[1],
+                        "distance_km": round(dist, 1),
+                        "is_corroborating": is_corroborating
+                    })
+            
+            # Spatial evidence status
+            if len(selected_neighbors) == 0:
+                spatial_status = "NO_NEIGHBORS"
+            elif len(selected_neighbors) == 1:
+                spatial_status = "LOW_EVIDENCE"
+            else:
+                spatial_status = "NORMAL"
+                
+            station_topologies.append({
+                "station_id": sid,
+                "station_name": st.station_name,
+                "latitude": st.latitude,
+                "longitude": st.longitude,
+                "elevation_m": st.elevation_m,
+                "region": st.region,
+                "station_type": st.station_type,
+                "neighbor_count": len(selected_neighbors),
+                "neighbors_within_radius": len(all_in_radius),
+                "radius_km": max_dist,
+                "k_neighbors_count": len(selected_neighbors),
+                "neighbors": neighbor_objs,
+                "nearest_neighbors": neighbor_objs,
+                "has_neighbors": len(selected_neighbors) > 0,
+                "spatial_status": spatial_status,
+                "is_corroborating_event": is_event
+            })
+            
+        return {
+            "radius_km": max_dist,
+            "k_nearest_neighbors": k_val,
+            "total_stations": len(self.stations),
+            "stations": station_topologies,
+            "edges": edges
+        }
 
     def analyze(
         self,
@@ -153,8 +247,8 @@ class SpatialConsistencyEngine:
             if target_val is None or np.isnan(target_val):
                 continue
                 
-            # Previous reading of target to calculate target delta
-            prev_target = self.prev_readings.get(target_id)
+            # Previous reading of target to calculate target delta (from previous cycle)
+            prev_target = self.latest_readings.get(target_id) or self.prev_readings.get(target_id)
             prev_target_val = getattr(prev_target, param, None) if prev_target else None
             target_delta = (target_val - prev_target_val) if (prev_target_val is not None and not np.isnan(prev_target_val)) else 0.0
             
@@ -172,9 +266,9 @@ class SpatialConsistencyEngine:
                             t_n = datetime.fromisoformat(nr.timestamp.replace("Z", "+00:00"))
                             age_sec = abs((t_target - t_n).total_seconds())
                             if age_sec > 900.0:  # Beyond 15-minute tolerance
-                                if nid not in stale_neighbors:
-                                    stale_neighbors.append(nid)
-                                continue
+                            	if nid not in stale_neighbors:
+                            		stale_neighbors.append(nid)
+                            	continue
                         except Exception:
                             pass
 
@@ -196,8 +290,8 @@ class SpatialConsistencyEngine:
                             
                         neighbor_vals.append(nv_norm)
                         
-                        # Calculate neighbor delta from its previous reading
-                        prev_nr = self.prev_readings.get(nid)
+                        # Calculate neighbor delta from its previous observation cycle
+                        prev_nr = self.latest_readings.get(nid) if (snapshot and nid in snapshot) else (self.prev_readings.get(nid) or self.latest_readings.get(nid))
                         prev_nv = getattr(prev_nr, param, None) if prev_nr else None
                         if prev_nv is not None and not np.isnan(prev_nv):
                             n_delta = float(nv) - float(prev_nv)

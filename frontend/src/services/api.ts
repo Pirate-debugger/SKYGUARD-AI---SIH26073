@@ -3,7 +3,7 @@
  * SIH26073: Automatic Weather Station Anomaly Detection System
  */
 
-import { NetworkOverview, StationData, AlertRecord, ProcessedReading } from '../types';
+import { NetworkOverview, StationData, AlertRecord, ProcessedReading, SpatialTopologyResponse } from '../types';
 
 const BASE_URL = '/api';
 
@@ -17,6 +17,17 @@ export const api = {
   async getNetworkOverview(): Promise<NetworkOverview> {
     const res = await fetch(`${BASE_URL}/network/overview`);
     if (!res.ok) throw new Error('Failed to fetch network overview');
+    return res.json();
+  },
+
+  async getSpatialTopology(radiusKm?: number, k?: number): Promise<SpatialTopologyResponse> {
+    let url = `${BASE_URL}/network/spatial`;
+    const params = new URLSearchParams();
+    if (radiusKm !== undefined) params.append('radius_km', radiusKm.toString());
+    if (k !== undefined) params.append('k', k.toString());
+    if (params.toString()) url += `?${params.toString()}`;
+    const res = await fetch(url);
+    if (!res.ok) throw new Error('Failed to fetch spatial topology');
     return res.json();
   },
 

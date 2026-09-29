@@ -55,11 +55,14 @@ export type float = number;
 export interface SensorHealthSummary {
   station_id: string;
   status: SensorHealthStatus;
+  communication_state?: string;
   health_score: number;
   degradation_signal: DegradationLevel;
   recent_spikes_count: number;
   recent_frozen_intervals: number;
   recent_comm_gaps: number;
+  missed_intervals?: number;
+  time_since_last_reading_min?: number;
   drift_trend_detected: boolean;
   maintenance_recommendation: MaintenanceRecommendation;
   summary_text: string;
@@ -113,7 +116,12 @@ export interface ProcessedReading {
   spatial_evidence: {
     is_consistent: boolean;
     neighbor_count: number;
+    valid_neighbor_count?: number;
+    corroborating_stations_count?: number;
+    agreement_ratio?: number;
+    directional_agreement?: boolean;
     neighbor_station_ids: string[];
+    stale_neighbor_ids?: string[];
     neighbor_medians: Record<string, number>;
     neighbor_mads: Record<string, number>;
     relative_deviations: Record<string, number>;
@@ -175,4 +183,63 @@ export interface StationData {
   metadata: StationMetadata;
   health: SensorHealthSummary | null;
   latest_reading: ProcessedReading | null;
+}
+
+export interface SpatialNeighbor {
+  station_id: string;
+  distance_km: number;
+}
+
+export interface SpatialTopologyStation {
+  station_id: string;
+  station_name: string;
+  latitude: number;
+  longitude: number;
+  elevation_m: number;
+  region: string;
+  station_type: string;
+  radius_km: number;
+  neighbor_count: number;
+  neighbors_within_radius: number;
+  k_neighbors_count: number;
+  neighbors: SpatialNeighbor[];
+  nearest_neighbors: SpatialNeighbor[];
+  has_neighbors: boolean;
+  spatial_status: 'NORMAL' | 'LOW_EVIDENCE' | 'NO_NEIGHBORS';
+  is_corroborating_event: boolean;
+  health_status: SensorHealthStatus;
+  communication_state: string;
+  health_score: number;
+  latest_decision: DecisionClassification | null;
+  latest_reading?: {
+    temperature: number | null;
+    pressure: number | null;
+    humidity: number | null;
+    timestamp: string;
+  } | null;
+  spatial_evidence?: {
+    is_consistent: boolean;
+    neighbor_count: number;
+    valid_neighbor_count: number;
+    corroborating_stations_count: number;
+    agreement_ratio: number;
+    directional_agreement: boolean;
+    regional_event_detected: boolean;
+    explanation: string;
+  } | null;
+}
+
+export interface SpatialTopologyEdge {
+  source: string;
+  target: string;
+  distance_km: number;
+  is_corroborating: boolean;
+}
+
+export interface SpatialTopologyResponse {
+  radius_km: number;
+  k_nearest_neighbors: number;
+  total_stations: number;
+  stations: SpatialTopologyStation[];
+  edges: SpatialTopologyEdge[];
 }

@@ -80,14 +80,16 @@ export const App: React.FC = () => {
             setTickCount(packet.tick);
             setIsStreaming(true);
 
-            // Update readings in stations list
+            // Update readings & health in stations list
             if (packet.readings && Array.isArray(packet.readings)) {
               setStations(prev => prev.map(st => {
                 const updated = packet.readings.find((r: ProcessedReading) => r.station_id === st.metadata.station_id);
-                if (updated) {
-                  return { ...st, latest_reading: updated };
-                }
-                return st;
+                const healthSummary = packet.health_summaries ? packet.health_summaries[st.metadata.station_id] : null;
+                return {
+                  ...st,
+                  latest_reading: updated || st.latest_reading,
+                  health: healthSummary || st.health
+                };
               }));
             }
 
@@ -96,8 +98,12 @@ export const App: React.FC = () => {
               setAlerts(prev => [...packet.alerts, ...prev].slice(0, 50));
             }
 
-            // Refresh overview counts
-            api.getNetworkOverview().then(setOverview).catch(() => {});
+            // Synchronized overview update
+            if (packet.network_overview) {
+              setOverview(packet.network_overview);
+            } else {
+              api.getNetworkOverview().then(setOverview).catch(() => {});
+            }
           } else if (packet.type === 'INIT_STATE') {
             setIsStreaming(packet.is_running);
             setTickCount(packet.tick);
@@ -223,6 +229,7 @@ export const App: React.FC = () => {
         {/* Left: Interactive Geospatial Network Map */}
         <NetworkMap
           stations={stations}
+          selectedStationId={selectedStationId}
           onSelectStation={handleSelectStation}
         />
 

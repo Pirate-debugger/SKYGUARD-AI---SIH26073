@@ -53,6 +53,12 @@ class SkyGuardPipeline:
         self.processed_history: Dict[str, List[ProcessedReading]] = {} # station_id -> list of readings
         self.prev_raw_readings: Dict[str, RawReading] = {}
 
+        # Pre-register default stations and initialize health trackers
+        from app.simulator.generator import DEFAULT_STATIONS
+        for st in DEFAULT_STATIONS:
+            self.spatial_engine.register_station(st)
+            self.health_engine.get_or_create_tracker(st.station_id)
+
     def process_batch(self, readings: List[RawReading]) -> List[Tuple[ProcessedReading, Optional[AlertRecord]]]:
         """
         Synchronized same-timestamp batch processing.

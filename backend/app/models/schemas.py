@@ -7,9 +7,10 @@ spatial-temporal tracking, explainability without unsupported probability claims
 and deterministic sensor health monitoring.
 """
 
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Union
+from datetime import datetime
 from enum import Enum
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class DataQualityStatus(str, Enum):
@@ -98,7 +99,7 @@ class StationMetadata(BaseModel):
 
 class RawReading(BaseModel):
     station_id: str
-    timestamp: str
+    timestamp: Union[str, datetime]
     temperature: Optional[float] = None
     pressure: Optional[float] = None
     humidity: Optional[float] = None
@@ -106,6 +107,13 @@ class RawReading(BaseModel):
     longitude: Optional[float] = None
     station_type: Optional[str] = None
     region: Optional[str] = None
+
+    @field_validator("timestamp", mode="before")
+    @classmethod
+    def serialize_timestamp(cls, v):
+        if isinstance(v, datetime):
+            return v.isoformat()
+        return str(v)
 
 
 class DataQualityResult(BaseModel):

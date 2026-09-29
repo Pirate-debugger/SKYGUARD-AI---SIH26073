@@ -38,6 +38,7 @@ from app.models.schemas import (
     StationMetadata,
     SensorHealthStatus,
     CommunicationState,
+    DecisionClassification,
     CsvIngestResult,
     CsvRowError
 )
@@ -169,6 +170,89 @@ async def get_network_overview():
         weather_events_count=weather_events,
         system_status="OPERATIONAL"
     )
+
+
+@app.get("/api/network/spatial")
+async def get_spatial_network_topology(
+    radius_km: Optional[float] = Query(None, description="Spatial search radius in km"),
+    k: Optional[int] = Query(None, description="Number of nearest neighbors to consider")
+):
+    """
+    Authoritative Geospatial Mesh Endpoint for SkyGuard AI.
+    Returns:
+    - Authoritative Haversine graph topology
+    - Dynamic radius and k parameters from backend configuration
+    - Real-time station health, latest readings, and spatial evidence
+    - Active edge corroborations
+    """
+    base_topo = pipeline.spatial_engine.get_network_topology(radius_km=radius_km, k=k)
+    health_dict = pipeline.health_engine.get_all_health_summaries()
+    
+    enriched_stations = []
+    active_weather_stations = set()
+    
+    for st_info in base_topo["stations"]:
+        sid = st_info["station_id"]
+        h = health_dict.get(sid)
+        last_reading = None
+        history = pipeline.processed_history.get(sid, [])
+        if history:
+            last_reading = history[-1]
+            
+        if last_reading and last_reading.decision == DecisionClassification.WEATHER_EVENT:
+            active_weather_stations.add(sid)
+            
+        reading_summary = None
+        spatial_ev_summary = None
+        latest_decision = None
+        if last_reading:
+            latest_decision = last_reading.decision.value if hasattr(last_reading.decision, "value") else str(last_reading.decision)
+            reading_summary = {
+                "temperature": last_reading.temperature,
+                "pressure": last_reading.pressure,
+                "humidity": last_reading.humidity,
+                "timestamp": last_reading.timestamp
+            }
+            spev = last_reading.spatial_evidence
+            spatial_ev_summary = {
+                "is_consistent": spev.is_consistent,
+                "neighbor_count": spev.neighbor_count,
+                "valid_neighbor_count": spev.valid_neighbor_count,
+                "corroborating_stations_count": spev.corroborating_stations_count,
+                "agreement_ratio": spev.agreement_ratio,
+                "directional_agreement": spev.directional_agreement,
+                "regional_event_detected": spev.regional_event_detected,
+                "explanation": spev.explanation
+            }
+            
+        enriched_stations.append({
+            **st_info,
+            "health_status": h.status.value if h else "HEALTHY",
+            "communication_state": h.communication_state.value if h else "ONLINE",
+            "health_score": h.health_score if h else 100.0,
+            "latest_decision": latest_decision,
+            "latest_reading": reading_summary,
+            "spatial_evidence": spatial_ev_summary
+        })
+        
+    # Re-evaluate edge corroboration based on live active weather events
+    edges = []
+    for edge in base_topo["edges"]:
+        src = edge["source"]
+        tgt = edge["target"]
+        is_corroborating = edge["is_corroborating"] or (src in active_weather_stations and tgt in active_weather_stations)
+        edges.append({
+            **edge,
+            "is_corroborating": is_corroborating
+        })
+        
+    return {
+        "radius_km": base_topo["radius_km"],
+        "k_nearest_neighbors": base_topo["k_nearest_neighbors"],
+        "total_stations": base_topo["total_stations"],
+        "stations": enriched_stations,
+        "edges": edges
+    }
 
 
 # --- Station APIs ---

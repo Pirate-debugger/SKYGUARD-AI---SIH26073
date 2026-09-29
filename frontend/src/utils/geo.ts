@@ -47,7 +47,12 @@ export function calculateGeoBounds(
   points: Array<{ latitude: number; longitude: number }>,
   paddingRatio: number = 0.12
 ) {
-  if (points.length === 0) {
+  const validPoints = (points || []).filter(
+    p => p && typeof p.latitude === 'number' && !isNaN(p.latitude) &&
+             typeof p.longitude === 'number' && !isNaN(p.longitude)
+  );
+
+  if (validPoints.length === 0) {
     return {
       minLat: 26.5,
       maxLat: 31.2,
@@ -56,8 +61,8 @@ export function calculateGeoBounds(
     };
   }
 
-  const lats = points.map(p => p.latitude);
-  const lons = points.map(p => p.longitude);
+  const lats = validPoints.map(p => p.latitude);
+  const lons = validPoints.map(p => p.longitude);
 
   const rawMinLat = Math.min(...lats);
   const rawMaxLat = Math.max(...lats);

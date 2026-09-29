@@ -355,14 +355,16 @@ export const NetworkMap: React.FC<NetworkMapProps> = ({
         borderRadius: '10px',
         overflow: 'hidden',
         border: '1px solid var(--border-subtle)',
-        minHeight: '350px'
+        minHeight: '380px',
+        display: 'flex',
+        alignItems: 'stretch'
       }}>
         
         <svg
           width="100%"
           height="100%"
           viewBox={`0 0 ${svgWidth} ${svgHeight}`}
-          style={{ position: 'absolute', inset: 0 }}
+          style={{ width: '100%', height: '100%', minHeight: '380px', display: 'block' }}
         >
           <defs>
             {/* Background Grid Pattern */}
